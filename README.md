@@ -76,7 +76,9 @@ python -m alembic upgrade head
 python -m alembic downgrade -1
 ```
 
-O diretório de versões começa vazio porque ainda não existem tabelas de negócio.
+A migration `003_initial_domain` cria as tabelas iniciais do domínio. Ela depende
+do schema `auth.users` presente em um projeto Supabase. Execute `upgrade head`
+apenas com `DATABASE_URL` configurada para o banco pretendido.
 
 ## Validação
 

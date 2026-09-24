@@ -1,0 +1,16 @@
+{
+  "name": "gamer-profile",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace @gamer-profile/web",
+    "build:web": "npm run build --workspace @gamer-profile/web",
+    "lint": "npm run lint --workspace @gamer-profile/web"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     database_max_overflow: int = Field(default=5, ge=0)
     database_pool_timeout: int = Field(default=30, ge=1)
     database_pool_recycle: int = Field(default=300, ge=1)
+    supabase_url: str | None = None
+    supabase_publishable_key: str | None = None
+    web_origin: str = "http://localhost:3000"
 
     @field_validator("database_url")
     @classmethod

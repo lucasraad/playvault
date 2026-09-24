@@ -65,6 +65,14 @@ A API estará em `http://localhost:8000`:
 O endpoint de banco retorna HTTP `503` quando a conexão não está configurada ou
 o banco está indisponível.
 
+## Autenticação
+
+Configure `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` e `WEB_ORIGIN` no `.env`.
+O frontend usa os endpoints `/auth/signup`, `/auth/login`, `/auth/refresh` e
+`/auth/me` da API. Consulte `docs/ARCHITECTURE.md` para o contrato completo.
+O primeiro `/auth/me` autenticado cria o perfil inicial no banco, portanto
+requer que a migration de domínio já tenha sido aplicada.
+
 ## Migrations
 
 O Alembic está configurado para usar a mesma `DATABASE_URL` da aplicação. No

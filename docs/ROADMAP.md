@@ -13,6 +13,8 @@
 ## Próximas tarefas
 
 1. Task 004 — Supabase Auth.
+   - backend: cadastro, login, refresh, validação de token e bootstrap de perfil implementados localmente;
+   - frontend Antigravity: telas e gerenciamento de sessão pendentes.
 2. Task 005 — integração IGDB.
 3. Task 006 — busca de jogos.
 4. Task 007 — biblioteca.

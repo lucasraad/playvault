@@ -5,6 +5,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import CheckConstraint, UniqueConstraint
 
+from app.core.config import get_settings
 from app.db.base import Base
 
 
@@ -52,8 +53,12 @@ def test_initial_domain_metadata_keeps_game_and_library_distinct() -> None:
 
 def test_initial_migration_renders_isolated_tables(monkeypatch, capsys) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:password@localhost/test")
+    get_settings.cache_clear()
     api_root = Path(__file__).resolve().parents[1]
-    command.upgrade(Config(api_root / "alembic.ini"), "head", sql=True)
+    try:
+        command.upgrade(Config(api_root / "alembic.ini"), "head", sql=True)
+    finally:
+        get_settings.cache_clear()
     sql = capsys.readouterr().out
 
     for table in (

@@ -16,6 +16,16 @@ Primeira etapa de domínio:
 - `library_entries`
 - `wishlist_entries`
 
+Implementadas na migration `003_initial_domain`:
+
+- `profiles.id` usa o UUID de `auth.users.id` como chave primária e FK com exclusão em cascata. O Supabase é o dono de `auth.users`; o Alembic nunca cria essa tabela. `username` é único.
+- `games` representa o título canônico (`title`, `igdb_id` opcional e único); `platforms` mantém `slug` único e nome legível. Ambos usam UUIDs internos.
+- `game_platforms` registra combinações conhecidas de jogo e plataforma, únicas por par. A biblioteca manual pode ser preenchida mesmo que essa associação ainda não tenha sido importada.
+- `library_entries` é única por `profile_id + game_id + platform_id`. Contém `status`, `source`, `playtime_minutes`, `rating` de 0 a 10 e `completion_percent` de 0 a 100. Os valores iniciais são `backlog`, `manual` e zero minuto.
+- `wishlist_entries` é única por `profile_id + game_id` e independe da biblioteca.
+
+As seis tabelas estão no schema `public`, com RLS habilitada e privilégios de `anon`, `authenticated` e `service_role` revogados. O acesso a dados ocorre pela API FastAPI, cuja conexão de banco deve ter privilégios apropriados. A Task 004 implementará autenticação e verificação de identidade antes de disponibilizar endpoints privados. Ainda não há políticas públicas de Data API nem gatilho de criação automática de perfil.
+
 Etapas posteriores:
 
 - `platform_accounts`

@@ -26,7 +26,8 @@ function TestComponent() {
     <div>
       <div data-testid="loading">{loading.toString()}</div>
       <div data-testid="user">{user ? user.email : "none"}</div>
-      <div data-testid="globalError">{globalError || "none"}</div>
+      <div data-testid="globalError">{globalError ? globalError.message : "none"}</div>
+      <div data-testid="globalErrorAction">{globalError ? globalError.action : "none"}</div>
       <button onClick={() => login("test@test.com", "password")}>Login</button>
       <button onClick={logout}>Logout</button>
       <button onClick={refreshUser}>Refresh</button>
@@ -202,8 +203,93 @@ describe("AuthContext and UserDashboard Behavior", () => {
 
     await waitFor(() => {
       expect(getByTestId("globalError")).toHaveTextContent("Logout failed. Please try again.");
+      expect(getByTestId("globalErrorAction")).toHaveTextContent("logout");
     });
     expect(getByTestId("user")).toHaveTextContent("gamer@example.com"); // Still there
+  });
+
+  it("can retry refreshUser after verification failure", async () => {
+    mockGetProxy.mockImplementation(async (path) => {
+      if (path === "/api/auth/refresh") return { has_session: true };
+      if (path === "/api/auth/me") return { id: "1", email: "gamer@example.com" };
+      throw new Error("Unexpected path");
+    });
+
+    const { getByTestId, getByText } = render(
+      <AuthProvider>
+        <TestComponent />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(getByTestId("user")).toHaveTextContent("gamer@example.com");
+    });
+
+    // Fail refresh first time
+    mockGetProxy.mockImplementationOnce(async (path) => {
+      if (path === "/api/auth/me") throw new apiClient.ApiRequestError(503, "Unavailable", "auth_unavailable");
+      throw new Error("Unexpected");
+    });
+
+    await userEvent.click(getByText("Refresh"));
+    await waitFor(() => {
+      expect(getByTestId("globalError")).toHaveTextContent("Failed to verify session. Please try again.");
+      expect(getByTestId("globalErrorAction")).toHaveTextContent("refresh");
+    });
+
+    // Succeed on retry
+    mockGetProxy.mockImplementationOnce(async (path) => {
+      if (path === "/api/auth/me") return { id: "1", email: "gamer@example.com" };
+      throw new Error("Unexpected path");
+    });
+
+    await userEvent.click(getByText("Refresh"));
+    await waitFor(() => {
+      expect(getByTestId("globalError")).toHaveTextContent("none");
+      expect(getByTestId("globalErrorAction")).toHaveTextContent("none");
+    });
+  });
+
+  it("can retry logout after logout failure", async () => {
+    mockGetProxy.mockImplementation(async (path) => {
+      if (path === "/api/auth/refresh") return { has_session: true };
+      if (path === "/api/auth/me") return { id: "1", email: "gamer@example.com" };
+      throw new Error("Unexpected path");
+    });
+
+    // First logout fails
+    mockPostProxy.mockImplementationOnce(async (path) => {
+      if (path === "/api/auth/logout") throw new apiClient.ApiRequestError(500, "Logout failed", "local_logout_failed");
+      throw new Error("Unexpected");
+    });
+
+    const { getByTestId, getByText } = render(
+      <AuthProvider>
+        <TestComponent />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(getByTestId("user")).toHaveTextContent("gamer@example.com");
+    });
+
+    await userEvent.click(getByText("Logout"));
+    await waitFor(() => {
+      expect(getByTestId("globalError")).toHaveTextContent("Logout failed. Please try again.");
+      expect(getByTestId("globalErrorAction")).toHaveTextContent("logout");
+    });
+
+    // Second logout succeeds
+    mockPostProxy.mockImplementationOnce(async (path) => {
+      if (path === "/api/auth/logout") return { logged_out: true, provider_session_revoked: false };
+      throw new Error("Unexpected");
+    });
+
+    await userEvent.click(getByText("Logout"));
+    await waitFor(() => {
+      expect(getByTestId("user")).toHaveTextContent("none");
+      expect(getByTestId("globalError")).toHaveTextContent("none");
+    });
   });
 });
 

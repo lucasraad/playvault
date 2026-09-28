@@ -30,11 +30,16 @@ import {
 
 /* ---------- Types ---------- */
 
+interface GlobalErrorState {
+  message: string;
+  action: "init" | "refresh" | "logout";
+}
+
 interface AuthState {
   user: AuthUser | null;
   loading: boolean;
   error: string | null;
-  globalError: string | null;
+  globalError: GlobalErrorState | null;
 }
 
 interface AuthContextValue extends AuthState {
@@ -75,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (err instanceof ApiRequestError && (err.status === 401 || err.code === "no_session" || err.code === "invalid_session")) {
         setState({ user: null, loading: false, error: null, globalError: null });
       } else {
-        setState((prev) => ({ ...prev, loading: false, globalError: "Failed to verify session. Please try again." }));
+        setState((prev) => ({ ...prev, loading: false, globalError: { message: "Failed to verify session. Please try again.", action: "refresh" } }));
       }
     }
   }, []);
@@ -104,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (err instanceof ApiRequestError && (err.status === 401 || err.code === "no_session" || err.code === "invalid_session")) {
             setState({ user: null, loading: false, error: null, globalError: null });
           } else {
-            setState((prev) => ({ ...prev, loading: false, globalError: "Failed to connect to the authentication service." }));
+            setState((prev) => ({ ...prev, loading: false, globalError: { message: "Failed to connect to the authentication service.", action: "init" } }));
           }
         }
       }
@@ -210,10 +215,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (result.logged_out) {
         setState({ user: null, loading: false, error: null, globalError: null });
       } else {
-        setState((prev) => ({ ...prev, loading: false, globalError: "Logout failed. Please try again." }));
+        setState((prev) => ({ ...prev, loading: false, globalError: { message: "Logout failed. Please try again.", action: "logout" } }));
       }
     } catch {
-      setState((prev) => ({ ...prev, loading: false, globalError: "Logout failed. Please try again." }));
+      setState((prev) => ({ ...prev, loading: false, globalError: { message: "Logout failed. Please try again.", action: "logout" } }));
     }
   }, []);
 

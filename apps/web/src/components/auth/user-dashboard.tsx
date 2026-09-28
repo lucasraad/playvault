@@ -17,11 +17,11 @@ export function UserDashboard() {
     <div className="dashboard" id="dashboard">
       {globalError && (
         <div className="dashboard__error-banner" style={{ background: "#ef4444", color: "white", padding: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>{globalError}</span>
+          <span>{globalError.message}</span>
           <button 
             onClick={() => { 
               clearError(); 
-              if (globalError.includes("Logout")) logout();
+              if (globalError.action === "logout") logout();
               else refreshUser(); 
             }} 
             style={{ background: "rgba(255,255,255,0.2)", padding: "0.25rem 0.75rem", borderRadius: "4px" }}

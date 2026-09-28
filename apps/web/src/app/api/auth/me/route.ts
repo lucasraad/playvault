@@ -11,6 +11,15 @@
 import { NextResponse } from "next/server";
 
 import {
+  forwardUpstreamError,
+  invalidSessionResponse,
+  invalidUpstreamResponse,
+  isSessionTokens,
+  noSessionResponse,
+  type SessionTokens,
+  unavailableResponse,
+} from "@/lib/auth-bff";
+import {
   clearSessionCookies,
   getAccessToken,
   getRefreshToken,
@@ -30,6 +39,35 @@ async function fetchMe(token: string): Promise<Response> {
   });
 }
 
+async function refreshSession(refreshToken: string): Promise<Response> {
+  return fetch(`${API_BASE}/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+}
+
+async function readAndStoreTokens(response: Response): Promise<SessionTokens | null> {
+  const tokens: unknown = await response.json().catch(() => null);
+  if (!isSessionTokens(tokens)) return null;
+
+  await setSessionCookies({
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    expiresIn: tokens.expires_in,
+  });
+  return tokens;
+}
+
+async function handleRefreshFailure(response: Response): Promise<NextResponse> {
+  if (response.status === 401) {
+    await clearSessionCookies();
+    return invalidSessionResponse();
+  }
+
+  return forwardUpstreamError(response);
+}
+
 export async function GET(): Promise<NextResponse> {
   try {
     let accessToken = await getAccessToken();
@@ -38,33 +76,18 @@ export async function GET(): Promise<NextResponse> {
       // Try to silently refresh
       const refreshToken = await getRefreshToken();
       if (!refreshToken) {
-        return NextResponse.json(
-          { detail: "Not authenticated" },
-          { status: 401 },
-        );
+        return noSessionResponse();
       }
 
-      const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
+      const refreshRes = await refreshSession(refreshToken);
 
       if (!refreshRes.ok) {
-        await clearSessionCookies();
-        return NextResponse.json(
-          { detail: "Session expired" },
-          { status: 401 },
-        );
+        return handleRefreshFailure(refreshRes);
       }
 
-      const tokens = await refreshRes.json();
-      await setSessionCookies({
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        expiresIn: tokens.expires_in,
-      });
-      accessToken = tokens.access_token as string;
+      const tokens = await readAndStoreTokens(refreshRes);
+      if (!tokens) return invalidUpstreamResponse();
+      accessToken = tokens.access_token;
     }
 
     const meRes = await fetchMe(accessToken);
@@ -72,47 +95,35 @@ export async function GET(): Promise<NextResponse> {
     if (meRes.status === 401) {
       // Access token might be expired; try refresh
       const refreshToken = await getRefreshToken();
-      if (refreshToken) {
-        const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh_token: refreshToken }),
-        });
-
-        if (refreshRes.ok) {
-          const tokens = await refreshRes.json();
-          await setSessionCookies({
-            accessToken: tokens.access_token,
-            refreshToken: tokens.refresh_token,
-            expiresIn: tokens.expires_in,
-          });
-
-          const retryRes = await fetchMe(tokens.access_token);
-          if (retryRes.ok) {
-            const user = await retryRes.json();
-            return NextResponse.json(user);
-          }
-        }
+      if (!refreshToken) {
+        await clearSessionCookies();
+        return invalidSessionResponse();
       }
 
-      await clearSessionCookies();
-      return NextResponse.json(
-        { detail: "Session expired" },
-        { status: 401 },
-      );
+      const refreshRes = await refreshSession(refreshToken);
+      if (!refreshRes.ok) return handleRefreshFailure(refreshRes);
+
+      const tokens = await readAndStoreTokens(refreshRes);
+      if (!tokens) return invalidUpstreamResponse();
+
+      const retryRes = await fetchMe(tokens.access_token);
+      if (retryRes.ok) return NextResponse.json(await retryRes.json());
+
+      if (retryRes.status === 401) {
+        await clearSessionCookies();
+        return invalidSessionResponse();
+      }
+
+      return forwardUpstreamError(retryRes);
     }
 
     if (!meRes.ok) {
-      const data = await meRes.json().catch(() => ({}));
-      return NextResponse.json(data, { status: meRes.status });
+      return forwardUpstreamError(meRes);
     }
 
     const user = await meRes.json();
     return NextResponse.json(user);
   } catch {
-    return NextResponse.json(
-      { detail: "Internal error" },
-      { status: 500 },
-    );
+    return unavailableResponse();
   }
 }

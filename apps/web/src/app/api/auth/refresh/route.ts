@@ -14,6 +14,14 @@
 import { NextResponse } from "next/server";
 
 import {
+  forwardUpstreamError,
+  invalidSessionResponse,
+  invalidUpstreamResponse,
+  isSessionTokens,
+  noSessionResponse,
+  unavailableResponse,
+} from "@/lib/auth-bff";
+import {
   clearSessionCookies,
   getRefreshToken,
   setSessionCookies,
@@ -26,10 +34,7 @@ export async function POST(): Promise<NextResponse> {
     const refreshToken = await getRefreshToken();
 
     if (!refreshToken) {
-      return NextResponse.json(
-        { detail: "No session to refresh" },
-        { status: 401 },
-      );
+      return noSessionResponse();
     }
 
     const upstream = await fetch(`${API_BASE}/auth/refresh`, {
@@ -39,13 +44,16 @@ export async function POST(): Promise<NextResponse> {
     });
 
     if (!upstream.ok) {
-      // Refresh failed — session expired, clear stale cookies
-      await clearSessionCookies();
-      const data = await upstream.json().catch(() => ({}));
-      return NextResponse.json(data, { status: upstream.status });
+      if (upstream.status === 401) {
+        await clearSessionCookies();
+        return invalidSessionResponse();
+      }
+
+      return forwardUpstreamError(upstream);
     }
 
-    const tokens = await upstream.json();
+    const tokens: unknown = await upstream.json().catch(() => null);
+    if (!isSessionTokens(tokens)) return invalidUpstreamResponse();
 
     // Rotate tokens
     await setSessionCookies({
@@ -59,10 +67,7 @@ export async function POST(): Promise<NextResponse> {
       expires_in: tokens.expires_in,
     });
   } catch {
-    return NextResponse.json(
-      { detail: "Internal error" },
-      { status: 500 },
-    );
+    return unavailableResponse();
   }
 }
 

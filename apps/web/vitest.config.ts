@@ -12,9 +12,10 @@ export default defineConfig({
     environment: "node",
     restoreMocks: true,
     isolate: false,
+    pool: 'forks',
     poolOptions: {
-      threads: {
-        singleThread: true
+      forks: {
+        singleFork: true
       }
     }
   },

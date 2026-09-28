@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { AuthProvider, useAuth } from "./auth-context";
 import { UserDashboard } from "@/components/auth/user-dashboard";
@@ -42,6 +42,10 @@ describe("AuthContext and UserDashboard Behavior", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("handles missing session (no_session) gracefully on init", async () => {
@@ -298,6 +302,10 @@ describe("UserDashboard Component", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("handles user with null email safely", async () => {

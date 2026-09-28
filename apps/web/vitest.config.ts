@@ -12,11 +12,6 @@ export default defineConfig({
     environment: "node",
     restoreMocks: true,
     isolate: false,
-    pool: 'forks',
-    poolOptions: {
-      forks: {
-        singleFork: true
-      }
-    }
+    maxWorkers: 1,
   },
 });

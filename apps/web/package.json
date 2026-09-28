@@ -27,6 +27,6 @@
     "jsdom": "^30.1.1",
     "tailwindcss": "latest",
     "typescript": "latest",
-    "vitest": "^4.0.7"
+    "vitest": "4.1.11"
   }
 }

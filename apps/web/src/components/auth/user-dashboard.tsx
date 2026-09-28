@@ -3,18 +3,33 @@
 import { useAuth } from "@/context/auth-context";
 
 export function UserDashboard() {
-  const { user, logout, loading } = useAuth();
+  const { user, logout, loading, globalError, clearError, refreshUser } = useAuth();
 
   if (!user) return null;
 
   // Extract a display name from email (before @)
-  const displayName = user.email.split("@")[0] ?? "Gamer";
+  const displayName = user.email ? user.email.split("@")[0] : "Gamer";
 
   // Get first letter for avatar
   const avatarLetter = displayName.charAt(0).toUpperCase();
 
   return (
     <div className="dashboard" id="dashboard">
+      {globalError && (
+        <div className="dashboard__error-banner" style={{ background: "#ef4444", color: "white", padding: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>{globalError}</span>
+          <button 
+            onClick={() => { 
+              clearError(); 
+              if (globalError.includes("Logout")) logout();
+              else refreshUser(); 
+            }} 
+            style={{ background: "rgba(255,255,255,0.2)", padding: "0.25rem 0.75rem", borderRadius: "4px" }}
+          >
+             Try Again
+          </button>
+        </div>
+      )}
       <header className="dashboard__header">
         <div className="dashboard__brand">
           <svg
@@ -123,7 +138,7 @@ export function UserDashboard() {
               <div className="dashboard__info-card-content">
                 <span className="dashboard__info-card-label">Email</span>
                 <span className="dashboard__info-card-value" id="user-email">
-                  {user.email}
+                  {user.email || "No email provided"}
                 </span>
               </div>
             </div>

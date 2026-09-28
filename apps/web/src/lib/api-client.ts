@@ -14,6 +14,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 export interface ApiError {
   status: number;
   detail: string;
+  code?: string;
   validationErrors?: ValidationError[];
 }
 
@@ -32,7 +33,7 @@ export interface SessionTokens {
 
 export interface AuthUser {
   id: string;
-  email: string;
+  email: string | null;
 }
 
 /* ---------- Helpers ---------- */
@@ -41,6 +42,7 @@ export class ApiRequestError extends Error {
   constructor(
     public readonly status: number,
     public readonly detail: string,
+    public readonly code?: string,
     public readonly validationErrors?: ValidationError[],
   ) {
     super(detail);
@@ -49,26 +51,30 @@ export class ApiRequestError extends Error {
 }
 
 async function parseErrorResponse(res: Response): Promise<ApiRequestError> {
+  let body: unknown;
   try {
-    const body = await res.json();
-
-    // FastAPI 422 returns { detail: [ { loc, msg, type } ] }
-    if (res.status === 422 && Array.isArray(body.detail)) {
-      return new ApiRequestError(
-        422,
-        "Validation failed",
-        body.detail as ValidationError[],
-      );
-    }
-
-    const detail =
-      typeof body.detail === "string"
-        ? body.detail
-        : "An unexpected error occurred";
-    return new ApiRequestError(res.status, detail);
+    body = await res.json();
   } catch {
     return new ApiRequestError(res.status, res.statusText || "Request failed");
   }
+
+  const parsed = (body || {}) as { detail?: unknown; code?: string };
+
+  // FastAPI 422 returns { detail: [ { loc, msg, type } ] }
+  if (res.status === 422 && Array.isArray(parsed.detail)) {
+    return new ApiRequestError(
+      422,
+      "Validation failed",
+      parsed.code,
+      parsed.detail as ValidationError[],
+    );
+  }
+
+  const detail =
+    typeof parsed.detail === "string"
+      ? parsed.detail
+      : "An unexpected error occurred";
+  return new ApiRequestError(res.status, detail, parsed.code);
 }
 
 /* ---------- Public API ---------- */

@@ -26,7 +26,6 @@ import {
   type AuthUser,
   getProxy,
   postProxy,
-  postProxyNoBody,
 } from "@/lib/api-client";
 
 /* ---------- Types ---------- */
@@ -35,6 +34,7 @@ interface AuthState {
   user: AuthUser | null;
   loading: boolean;
   error: string | null;
+  globalError: string | null;
 }
 
 interface AuthContextValue extends AuthState {
@@ -58,22 +58,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user: null,
     loading: true,
     error: null,
+    globalError: null,
   });
 
 
   const clearError = useCallback(() => {
-    setState((prev) => ({ ...prev, error: null }));
+    setState((prev) => ({ ...prev, error: null, globalError: null }));
   }, []);
 
   const refreshUser = useCallback(async () => {
+    setState((prev) => ({ ...prev, loading: true, error: null, globalError: null }));
     try {
       const user = await getProxy<AuthUser>("/api/auth/me");
-      setState({ user, loading: false, error: null });
+      setState((prev) => ({ ...prev, user, loading: false, error: null, globalError: null }));
     } catch (err) {
-      if (err instanceof ApiRequestError && err.status === 401) {
-        setState({ user: null, loading: false, error: null });
+      if (err instanceof ApiRequestError && (err.status === 401 || err.code === "no_session" || err.code === "invalid_session")) {
+        setState({ user: null, loading: false, error: null, globalError: null });
       } else {
-        setState({ user: null, loading: false, error: null });
+        setState((prev) => ({ ...prev, loading: false, globalError: "Failed to verify session. Please try again." }));
       }
     }
   }, []);
@@ -90,15 +92,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         );
 
         if (!has_session) {
-          if (!cancelled) setState({ user: null, loading: false, error: null });
+          if (!cancelled) setState({ user: null, loading: false, error: null, globalError: null });
           return;
         }
 
         // Session cookie exists — validate it (BFF will refresh if needed)
         const user = await getProxy<AuthUser>("/api/auth/me");
-        if (!cancelled) setState({ user, loading: false, error: null });
-      } catch {
-        if (!cancelled) setState({ user: null, loading: false, error: null });
+        if (!cancelled) setState({ user, loading: false, error: null, globalError: null });
+      } catch (err) {
+        if (!cancelled) {
+          if (err instanceof ApiRequestError && (err.status === 401 || err.code === "no_session" || err.code === "invalid_session")) {
+            setState({ user: null, loading: false, error: null, globalError: null });
+          } else {
+            setState((prev) => ({ ...prev, loading: false, globalError: "Failed to connect to the authentication service." }));
+          }
+        }
       }
     }
 
@@ -117,7 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Login succeeded — fetch user data
       const user = await getProxy<AuthUser>("/api/auth/me");
-      setState({ user, loading: false, error: null });
+      setState({ user, loading: false, error: null, globalError: null });
     } catch (err) {
       let message = "An unexpected error occurred";
 
@@ -195,15 +203,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    setState((prev) => ({ ...prev, loading: true }));
+    setState((prev) => ({ ...prev, loading: true, error: null, globalError: null }));
 
     try {
-      await postProxyNoBody("/api/auth/logout");
+      const result = await postProxy<{ logged_out: boolean }>("/api/auth/logout", {});
+      if (result.logged_out) {
+        setState({ user: null, loading: false, error: null, globalError: null });
+      } else {
+        setState((prev) => ({ ...prev, loading: false, globalError: "Logout failed. Please try again." }));
+      }
     } catch {
-      // Even if the logout call fails, clear local state
+      setState((prev) => ({ ...prev, loading: false, globalError: "Logout failed. Please try again." }));
     }
-
-    setState({ user: null, loading: false, error: null });
   }, []);
 
   const value = useMemo<AuthContextValue>(

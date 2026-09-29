@@ -24,6 +24,7 @@ import type { ReactNode } from "react";
 import {
   ApiRequestError,
   type AuthUser,
+  type ValidationError,
   getProxy,
   postProxy,
 } from "@/lib/api-client";
@@ -54,6 +55,66 @@ interface SignupResult {
   message: string;
 }
 
+interface AuthFailure {
+  status?: number;
+  detail?: string;
+  code?: string;
+  validationErrors?: ValidationError[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isValidationError(value: unknown): value is ValidationError {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.loc) &&
+    typeof value.msg === "string" &&
+    typeof value.type === "string"
+  );
+}
+
+function asAuthFailure(error: unknown): AuthFailure | null {
+  if (error instanceof ApiRequestError) return error;
+  if (!isRecord(error)) return null;
+
+  const status = typeof error.status === "number" ? error.status : undefined;
+  const code = typeof error.code === "string" ? error.code : undefined;
+  const name = typeof error.name === "string" ? error.name : undefined;
+
+  if (name !== "ApiRequestError" && status === undefined && code === undefined) {
+    return null;
+  }
+
+  const validationErrors = Array.isArray(error.validationErrors)
+    ? error.validationErrors.filter(isValidationError)
+    : undefined;
+
+  return {
+    status,
+    code,
+    detail: typeof error.detail === "string" ? error.detail : undefined,
+    validationErrors,
+  };
+}
+
+function getGlobalErrorMessage(error: AuthFailure | null, defaultMessage: string) {
+  if (error?.code === "rate_limited" || error?.status === 429) {
+    return "Too many requests. Please wait a moment and try again.";
+  }
+  if (error?.code === "auth_unavailable" || error?.status === 503) {
+    return "Authentication service is temporarily unavailable. Please try again later.";
+  }
+  if (error?.code === "invalid_upstream_response" || error?.status === 502) {
+    return "Received an invalid response from the authentication service. Please try again.";
+  }
+  if (error?.code === "auth_upstream_error") {
+    return "An error occurred with the authentication service. Please try again.";
+  }
+  return defaultMessage;
+}
+
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 /* ---------- Provider ---------- */
@@ -70,39 +131,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearError = useCallback(() => {
     setState((prev) => ({ ...prev, error: null, globalError: null }));
   }, []);
-
-  const getGlobalErrorMessage = (error: unknown, defaultMessage: string) => {
-    const err = error as any;
-    const isApiError = err && (err instanceof ApiRequestError || err.name === "ApiRequestError" || err.code);
-    if (isApiError) {
-      if (err.code === "rate_limited" || err.status === 429) {
-        return "Too many requests. Please wait a moment and try again.";
-      }
-      if (err.code === "auth_unavailable" || err.status === 503) {
-        return "Authentication service is temporarily unavailable. Please try again later.";
-      }
-      if (err.code === "invalid_upstream_response" || err.status === 502) {
-        return "Received an invalid response from the authentication service. Please try again.";
-      }
-      if (err.code === "auth_upstream_error") {
-        return "An error occurred with the authentication service. Please try again.";
-      }
-    }
-    return defaultMessage;
-  };
-
   const refreshUser = useCallback(async () => {
     setState((prev) => ({ ...prev, loading: true, error: null, globalError: null }));
     try {
       const user = await getProxy<AuthUser>("/api/auth/me");
       setState((prev) => ({ ...prev, user, loading: false, error: null, globalError: null }));
     } catch (error) {
-      const err = error as any;
-      const isApiError = err && (err instanceof ApiRequestError || err.name === "ApiRequestError" || err.code);
-      if (isApiError && (err.status === 401 || err.code === "no_session" || err.code === "invalid_session")) {
+      const failure = asAuthFailure(error);
+      if (failure && (failure.status === 401 || failure.code === "no_session" || failure.code === "invalid_session")) {
         setState({ user: null, loading: false, error: null, globalError: null });
       } else {
-        const message = getGlobalErrorMessage(err, "Failed to verify session. Please try again.");
+        const message = getGlobalErrorMessage(failure, "Failed to verify session. Please try again.");
         setState((prev) => ({ ...prev, loading: false, globalError: { message, action: "refresh" } }));
       }
     }
@@ -129,12 +168,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!cancelled) setState({ user, loading: false, error: null, globalError: null });
       } catch (error) {
         if (!cancelled) {
-          const err = error as any;
-          const isApiError = err && (err instanceof ApiRequestError || err.name === "ApiRequestError" || err.code);
-          if (isApiError && (err.status === 401 || err.code === "no_session" || err.code === "invalid_session")) {
+          const failure = asAuthFailure(error);
+          if (failure && (failure.status === 401 || failure.code === "no_session" || failure.code === "invalid_session")) {
             setState({ user: null, loading: false, error: null, globalError: null });
           } else {
-            const message = getGlobalErrorMessage(err, "Failed to connect to the authentication service.");
+            const message = getGlobalErrorMessage(failure, "Failed to connect to the authentication service.");
             setState((prev) => ({ ...prev, loading: false, globalError: { message, action: "init" } }));
           }
         }
@@ -159,17 +197,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState({ user, loading: false, error: null, globalError: null });
     } catch (error) {
       let message = "An unexpected error occurred";
-      const err = error as any;
-      const isApiError = err && (err instanceof ApiRequestError || err.name === "ApiRequestError" || err.code);
+      const failure = asAuthFailure(error);
 
-      if (isApiError) {
-        switch (err.status) {
+      if (failure) {
+        switch (failure.status) {
           case 401:
             message = "Invalid email or password";
             break;
           case 422:
             message =
-              err.validationErrors
+              failure.validationErrors
                 ?.map((e) => e.msg)
                 .join(". ") ?? "Please check your input";
             break;
@@ -181,12 +218,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               "Authentication service is temporarily unavailable. Please try again later";
             break;
           default:
-            message = err.detail;
+            message = failure.detail ?? message;
         }
       }
 
       setState((prev) => ({ ...prev, loading: false, error: message }));
-      throw err;
+      throw error;
     }
   }, []);
 
@@ -203,17 +240,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return result;
       } catch (error) {
         let message = "An unexpected error occurred";
-        const err = error as any;
-        const isApiError = err && (err instanceof ApiRequestError || err.name === "ApiRequestError" || err.code);
+        const failure = asAuthFailure(error);
 
-        if (isApiError) {
-          switch (err.status) {
+        if (failure) {
+          switch (failure.status) {
             case 400:
               message = "Registration failed. The email may already be in use";
               break;
             case 422:
               message =
-                err.validationErrors
+                failure.validationErrors
                   ?.map((e) => e.msg)
                   .join(". ") ?? "Please check your input";
               break;
@@ -226,12 +262,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 "Authentication service is temporarily unavailable. Please try again later";
               break;
             default:
-              message = err.detail;
+              message = failure.detail ?? message;
           }
         }
 
         setState((prev) => ({ ...prev, loading: false, error: message }));
-        throw err;
+        throw error;
       }
     },
     [],

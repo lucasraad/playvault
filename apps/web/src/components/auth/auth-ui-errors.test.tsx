@@ -8,7 +8,7 @@ import React from "react";
 import { AuthProvider, useAuth } from "@/context/auth-context";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { UserDashboard } from "@/components/auth/user-dashboard";
-import { ApiRequestError, getProxy } from "@/lib/api-client";
+import { getProxy } from "@/lib/api-client";
 
 vi.mock("@/lib/api-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api-client")>();
@@ -120,4 +120,3 @@ describe("Auth UI - Recoverable Errors", () => {
     });
   });
 });
-

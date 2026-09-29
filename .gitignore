@@ -3,6 +3,9 @@ node_modules/
 .next/
 out/
 npm-debug.log*
+apps/web/next-env.d.ts
+apps/web/AGENTS.md
+apps/web/CLAUDE.md
 
 # Python
 __pycache__/

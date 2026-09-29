@@ -77,7 +77,7 @@ describe("AuthContext and UserDashboard Behavior", () => {
     mockGetProxy.mockImplementation(async (path) => {
       if (path === "/api/auth/refresh") return { has_session: true };
       if (path === "/api/auth/me") {
-        throw new apiClient.ApiRequestError(503, "Unavailable", "auth_unavailable");
+        throw { name: "ApiRequestError", status: 503, detail: "Unavailable", code: "auth_unavailable" };
       }
       throw new Error("Unexpected path");
     });
@@ -93,14 +93,14 @@ describe("AuthContext and UserDashboard Behavior", () => {
     });
 
     expect(screen.getByTestId("user")).toHaveTextContent("none");
-    expect(screen.getByTestId("globalError")).toHaveTextContent("Failed to connect to the authentication service.");
+    expect(screen.getByTestId("globalError")).toHaveTextContent("Authentication service is temporarily unavailable. Please try again later.");
   });
 
   it("handles 401 invalid_session error on init by clearing state without globalError", async () => {
     mockGetProxy.mockImplementation(async (path) => {
       if (path === "/api/auth/refresh") return { has_session: true };
       if (path === "/api/auth/me") {
-        throw new apiClient.ApiRequestError(401, "Invalid", "invalid_session");
+        throw { name: "ApiRequestError", status: 401, detail: "Invalid", code: "invalid_session" };
       }
       throw new Error("Unexpected path");
     });
@@ -138,14 +138,14 @@ describe("AuthContext and UserDashboard Behavior", () => {
 
     // Now user wants to refresh, but it fails with 429
     mockGetProxy.mockImplementation(async (path) => {
-      if (path === "/api/auth/me") throw new apiClient.ApiRequestError(429, "Too many requests", "rate_limited");
+      if (path === "/api/auth/me") throw { name: "ApiRequestError", status: 429, detail: "Too many requests", code: "rate_limited" };
       throw new Error("Unexpected");
     });
 
     await userEvent.click(getByText("Refresh"));
 
     await waitFor(() => {
-      expect(getByTestId("globalError")).toHaveTextContent("Failed to verify session. Please try again.");
+      expect(getByTestId("globalError")).toHaveTextContent("Too many requests. Please wait a moment and try again.");
     });
     // User is preserved!
     expect(getByTestId("user")).toHaveTextContent("gamer@example.com");
@@ -189,7 +189,7 @@ describe("AuthContext and UserDashboard Behavior", () => {
     });
 
     mockPostProxy.mockImplementation(async (path) => {
-      if (path === "/api/auth/logout") throw new apiClient.ApiRequestError(500, "Logout failed", "local_logout_failed");
+      if (path === "/api/auth/logout") throw { name: "ApiRequestError", status: 500, detail: "Logout failed", code: "local_logout_failed" };
       throw new Error("Unexpected");
     });
 
@@ -231,13 +231,13 @@ describe("AuthContext and UserDashboard Behavior", () => {
 
     // Fail refresh first time
     mockGetProxy.mockImplementationOnce(async (path) => {
-      if (path === "/api/auth/me") throw new apiClient.ApiRequestError(503, "Unavailable", "auth_unavailable");
+      if (path === "/api/auth/me") throw { name: "ApiRequestError", status: 503, detail: "Unavailable", code: "auth_unavailable" };
       throw new Error("Unexpected");
     });
 
     await userEvent.click(getByText("Refresh"));
     await waitFor(() => {
-      expect(getByTestId("globalError")).toHaveTextContent("Failed to verify session. Please try again.");
+      expect(getByTestId("globalError")).toHaveTextContent("Authentication service is temporarily unavailable. Please try again later.");
       expect(getByTestId("globalErrorAction")).toHaveTextContent("refresh");
     });
 
@@ -263,7 +263,7 @@ describe("AuthContext and UserDashboard Behavior", () => {
 
     // First logout fails
     mockPostProxy.mockImplementationOnce(async (path) => {
-      if (path === "/api/auth/logout") throw new apiClient.ApiRequestError(500, "Logout failed", "local_logout_failed");
+      if (path === "/api/auth/logout") throw { name: "ApiRequestError", status: 500, detail: "Logout failed", code: "local_logout_failed" };
       throw new Error("Unexpected");
     });
 

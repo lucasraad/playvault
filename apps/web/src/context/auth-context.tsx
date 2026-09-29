@@ -71,16 +71,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, error: null, globalError: null }));
   }, []);
 
+  const getGlobalErrorMessage = (error: unknown, defaultMessage: string) => {
+    const err = error as any;
+    const isApiError = err && (err instanceof ApiRequestError || err.name === "ApiRequestError" || err.code);
+    if (isApiError) {
+      if (err.code === "rate_limited" || err.status === 429) {
+        return "Too many requests. Please wait a moment and try again.";
+      }
+      if (err.code === "auth_unavailable" || err.status === 503) {
+        return "Authentication service is temporarily unavailable. Please try again later.";
+      }
+      if (err.code === "invalid_upstream_response" || err.status === 502) {
+        return "Received an invalid response from the authentication service. Please try again.";
+      }
+      if (err.code === "auth_upstream_error") {
+        return "An error occurred with the authentication service. Please try again.";
+      }
+    }
+    return defaultMessage;
+  };
+
   const refreshUser = useCallback(async () => {
     setState((prev) => ({ ...prev, loading: true, error: null, globalError: null }));
     try {
       const user = await getProxy<AuthUser>("/api/auth/me");
       setState((prev) => ({ ...prev, user, loading: false, error: null, globalError: null }));
-    } catch (err) {
-      if (err instanceof ApiRequestError && (err.status === 401 || err.code === "no_session" || err.code === "invalid_session")) {
+    } catch (error) {
+      const err = error as any;
+      const isApiError = err && (err instanceof ApiRequestError || err.name === "ApiRequestError" || err.code);
+      if (isApiError && (err.status === 401 || err.code === "no_session" || err.code === "invalid_session")) {
         setState({ user: null, loading: false, error: null, globalError: null });
       } else {
-        setState((prev) => ({ ...prev, loading: false, globalError: { message: "Failed to verify session. Please try again.", action: "refresh" } }));
+        const message = getGlobalErrorMessage(err, "Failed to verify session. Please try again.");
+        setState((prev) => ({ ...prev, loading: false, globalError: { message, action: "refresh" } }));
       }
     }
   }, []);
@@ -104,12 +127,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Session cookie exists — validate it (BFF will refresh if needed)
         const user = await getProxy<AuthUser>("/api/auth/me");
         if (!cancelled) setState({ user, loading: false, error: null, globalError: null });
-      } catch (err) {
+      } catch (error) {
         if (!cancelled) {
-          if (err instanceof ApiRequestError && (err.status === 401 || err.code === "no_session" || err.code === "invalid_session")) {
+          const err = error as any;
+          const isApiError = err && (err instanceof ApiRequestError || err.name === "ApiRequestError" || err.code);
+          if (isApiError && (err.status === 401 || err.code === "no_session" || err.code === "invalid_session")) {
             setState({ user: null, loading: false, error: null, globalError: null });
           } else {
-            setState((prev) => ({ ...prev, loading: false, globalError: { message: "Failed to connect to the authentication service.", action: "init" } }));
+            const message = getGlobalErrorMessage(err, "Failed to connect to the authentication service.");
+            setState((prev) => ({ ...prev, loading: false, globalError: { message, action: "init" } }));
           }
         }
       }
@@ -131,10 +157,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Login succeeded — fetch user data
       const user = await getProxy<AuthUser>("/api/auth/me");
       setState({ user, loading: false, error: null, globalError: null });
-    } catch (err) {
+    } catch (error) {
       let message = "An unexpected error occurred";
+      const err = error as any;
+      const isApiError = err && (err instanceof ApiRequestError || err.name === "ApiRequestError" || err.code);
 
-      if (err instanceof ApiRequestError) {
+      if (isApiError) {
         switch (err.status) {
           case 401:
             message = "Invalid email or password";
@@ -173,10 +201,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         );
         setState((prev) => ({ ...prev, loading: false }));
         return result;
-      } catch (err) {
+      } catch (error) {
         let message = "An unexpected error occurred";
+        const err = error as any;
+        const isApiError = err && (err instanceof ApiRequestError || err.name === "ApiRequestError" || err.code);
 
-        if (err instanceof ApiRequestError) {
+        if (isApiError) {
           switch (err.status) {
             case 400:
               message = "Registration failed. The email may already be in use";

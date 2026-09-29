@@ -80,7 +80,13 @@ O browser faz chamadas às rotas internas do Next.js (`/api/auth/*`), que:
 
 ### Renovação transparente
 
-Quando `GET /api/auth/me` recebe 401 do backend (access token expirado), o BFF tenta renovar a sessão automaticamente usando o refresh token do cookie `gp_rt`. Se a renovação for bem-sucedida, os cookies são atualizados (rotação) e a requisição é re-executada. Se falhar, os cookies são limpos e o client recebe 401.
+Quando `GET /api/auth/me` recebe 401 do backend (access token expirado), o BFF tenta renovar a sessão automaticamente usando o refresh token do cookie `gp_rt`. Se a renovação for bem-sucedida, os cookies são atualizados (rotação) e a requisição é re-executada. Os cookies só são limpos quando o refresh token é rejeitado com 401 ou quando o access token recém-emitido também é rejeitado com 401.
+
+Uma falha de renovação só invalida a sessão local quando o backend responde 401,
+confirmando que o refresh token não é mais aceito. Rate limit, indisponibilidade,
+falha de rede e outros erros do upstream preservam os cookies existentes. Se a
+renovação tiver sucesso, mas o retry de `/auth/me` falhar com 429, 503 ou outro
+erro não-401, o par de tokens recém-rotacionado também é preservado.
 
 ### Rotas BFF
 
@@ -91,7 +97,28 @@ Quando `GET /api/auth/me` recebe 401 do backend (access token expirado), o BFF t
 | `/api/auth/refresh` | POST | Usa cookie `gp_rt` para renovar; atualiza cookies. |
 | `/api/auth/refresh` | GET | Retorna `{ has_session: boolean }` (sem revelar token). |
 | `/api/auth/me` | GET | Usa cookie `gp_at` para consultar `/auth/me`; renova se 401. |
-| `/api/auth/logout` | POST | Limpa cookies de sessão. |
+| `/api/auth/logout` | POST | Limpa apenas os cookies locais; não revoga a sessão no Supabase. |
+
+### Contrato de erros do BFF
+
+As respostas de erro nunca incluem access ou refresh tokens. O campo `code` é
+estável para a interface distinguir estados, enquanto `detail` é uma mensagem
+legível.
+
+| Situação | Status | `code` | Cookies |
+| --- | --- | --- | --- |
+| Nenhum cookie de sessão disponível | 401 | `no_session` | não altera |
+| Backend rejeita refresh token, ou rejeita novamente o access token recém-emitido | 401 | `invalid_session` | limpa ambos |
+| Rate limit do backend/provedor | 429 | `rate_limited` | preserva |
+| Backend/provedor indisponível ou falha de rede | 503 | `auth_unavailable` | preserva |
+| Resposta 2xx inválida do serviço de autenticação | 502 | `invalid_upstream_response` | preserva |
+| Outro erro não-401 do upstream | status original | `auth_upstream_error` | preserva |
+| Falha ao limpar cookies no logout | 500 | `local_logout_failed` | sucesso local não confirmado |
+
+O logout bem-sucedido retorna
+`{logged_out: true, provider_session_revoked: false}`. Ele encerra a sessão neste
+navegador ao remover os cookies `HttpOnly`, mas não chama o endpoint de sign-out
+do Supabase. Revogação local/global no provedor é uma decisão de produto separada.
 
 ### Garantias de segurança
 
@@ -99,6 +126,7 @@ Quando `GET /api/auth/me` recebe 401 do backend (access token expirado), o BFF t
 - Tokens nunca são armazenados em `localStorage`, `sessionStorage` ou state React.
 - O refresh token usa `SameSite=Strict`, impedindo envio em requests cross-site.
 - O escopo `Path=/api/auth` evita envio desnecessário de cookies em outras requisições.
+- Respostas do BFF expõem apenas estado, códigos de erro e dados do usuário; nunca os tokens.
 
 ## Integrações
 

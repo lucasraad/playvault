@@ -1,0 +1,329 @@
+// @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
+import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import React from "react";
+import { AuthProvider, useAuth } from "./auth-context";
+import { UserDashboard } from "@/components/auth/user-dashboard";
+import * as apiClient from "@/lib/api-client";
+
+// Mock the API client
+vi.mock("@/lib/api-client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api-client")>();
+  return {
+    ...actual,
+    getProxy: vi.fn(),
+    postProxy: vi.fn(),
+  };
+});
+
+// A dummy component to consume the context
+function TestComponent() {
+  const { user, loading, globalError, login, logout, refreshUser, clearError } = useAuth();
+
+  return (
+    <div>
+      <div data-testid="loading">{loading.toString()}</div>
+      <div data-testid="user">{user ? user.email : "none"}</div>
+      <div data-testid="globalError">{globalError ? globalError.message : "none"}</div>
+      <div data-testid="globalErrorAction">{globalError ? globalError.action : "none"}</div>
+      <button onClick={() => login("test@test.com", "password")}>Login</button>
+      <button onClick={logout}>Logout</button>
+      <button onClick={refreshUser}>Refresh</button>
+      <button onClick={clearError}>Clear</button>
+    </div>
+  );
+}
+
+describe("AuthContext and UserDashboard Behavior", () => {
+  const mockGetProxy = vi.mocked(apiClient.getProxy);
+  const mockPostProxy = vi.mocked(apiClient.postProxy);
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("handles missing session (no_session) gracefully on init", async () => {
+    // /api/auth/refresh returns has_session: false
+    mockGetProxy.mockImplementation(async (path) => {
+      if (path === "/api/auth/refresh") return { has_session: false };
+      throw new Error("Unexpected path");
+    });
+
+    render(
+      <AuthProvider>
+        <TestComponent />
+      </AuthProvider>
+    );
+
+    expect(screen.getByTestId("loading")).toHaveTextContent("true");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("loading")).toHaveTextContent("false");
+    });
+
+    expect(screen.getByTestId("user")).toHaveTextContent("none");
+    expect(screen.getByTestId("globalError")).toHaveTextContent("none");
+  });
+
+  it("handles 503 auth_unavailable error on init by setting globalError", async () => {
+    // /api/auth/refresh returns has_session: true
+    // /api/auth/me returns 503
+    mockGetProxy.mockImplementation(async (path) => {
+      if (path === "/api/auth/refresh") return { has_session: true };
+      if (path === "/api/auth/me") {
+        throw { name: "ApiRequestError", status: 503, detail: "Unavailable", code: "auth_unavailable" };
+      }
+      throw new Error("Unexpected path");
+    });
+
+    render(
+      <AuthProvider>
+        <TestComponent />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("loading")).toHaveTextContent("false");
+    });
+
+    expect(screen.getByTestId("user")).toHaveTextContent("none");
+    expect(screen.getByTestId("globalError")).toHaveTextContent("Authentication service is temporarily unavailable. Please try again later.");
+  });
+
+  it("handles 401 invalid_session error on init by clearing state without globalError", async () => {
+    mockGetProxy.mockImplementation(async (path) => {
+      if (path === "/api/auth/refresh") return { has_session: true };
+      if (path === "/api/auth/me") {
+        throw { name: "ApiRequestError", status: 401, detail: "Invalid", code: "invalid_session" };
+      }
+      throw new Error("Unexpected path");
+    });
+
+    render(
+      <AuthProvider>
+        <TestComponent />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("loading")).toHaveTextContent("false");
+    });
+
+    expect(screen.getByTestId("user")).toHaveTextContent("none");
+    expect(screen.getByTestId("globalError")).toHaveTextContent("none");
+  });
+
+  it("handles 429 rate_limited on refreshUser while preserving existing user data", async () => {
+    mockGetProxy.mockImplementation(async (path) => {
+      if (path === "/api/auth/refresh") return { has_session: true };
+      if (path === "/api/auth/me") return { id: "1", email: "gamer@example.com" };
+      throw new Error("Unexpected path");
+    });
+
+    const { getByTestId, getByText } = render(
+      <AuthProvider>
+        <TestComponent />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(getByTestId("user")).toHaveTextContent("gamer@example.com");
+    });
+
+    // Now user wants to refresh, but it fails with 429
+    mockGetProxy.mockImplementation(async (path) => {
+      if (path === "/api/auth/me") throw { name: "ApiRequestError", status: 429, detail: "Too many requests", code: "rate_limited" };
+      throw new Error("Unexpected");
+    });
+
+    await userEvent.click(getByText("Refresh"));
+
+    await waitFor(() => {
+      expect(getByTestId("globalError")).toHaveTextContent("Too many requests. Please wait a moment and try again.");
+    });
+    // User is preserved!
+    expect(getByTestId("user")).toHaveTextContent("gamer@example.com");
+  });
+
+  it("handles successful logout correctly", async () => {
+    mockGetProxy.mockImplementation(async (path) => {
+      if (path === "/api/auth/refresh") return { has_session: true };
+      if (path === "/api/auth/me") return { id: "1", email: "gamer@example.com" };
+      throw new Error("Unexpected");
+    });
+
+    mockPostProxy.mockImplementation(async (path) => {
+      if (path === "/api/auth/logout") return { logged_out: true, provider_session_revoked: false };
+      throw new Error("Unexpected");
+    });
+
+    const { getByTestId, getByText } = render(
+      <AuthProvider>
+        <TestComponent />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(getByTestId("user")).toHaveTextContent("gamer@example.com");
+    });
+
+    await userEvent.click(getByText("Logout"));
+
+    await waitFor(() => {
+      expect(getByTestId("user")).toHaveTextContent("none");
+      expect(getByTestId("globalError")).toHaveTextContent("none");
+    });
+  });
+
+  it("handles failed logout correctly by preserving user state and showing error", async () => {
+    mockGetProxy.mockImplementation(async (path) => {
+      if (path === "/api/auth/refresh") return { has_session: true };
+      if (path === "/api/auth/me") return { id: "1", email: "gamer@example.com" };
+      throw new Error("Unexpected");
+    });
+
+    mockPostProxy.mockImplementation(async (path) => {
+      if (path === "/api/auth/logout") throw { name: "ApiRequestError", status: 500, detail: "Logout failed", code: "local_logout_failed" };
+      throw new Error("Unexpected");
+    });
+
+    const { getByTestId, getByText } = render(
+      <AuthProvider>
+        <TestComponent />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(getByTestId("user")).toHaveTextContent("gamer@example.com");
+    });
+
+    await userEvent.click(getByText("Logout"));
+
+    await waitFor(() => {
+      expect(getByTestId("globalError")).toHaveTextContent("Logout failed. Please try again.");
+      expect(getByTestId("globalErrorAction")).toHaveTextContent("logout");
+    });
+    expect(getByTestId("user")).toHaveTextContent("gamer@example.com"); // Still there
+  });
+
+  it("can retry refreshUser after verification failure", async () => {
+    mockGetProxy.mockImplementation(async (path) => {
+      if (path === "/api/auth/refresh") return { has_session: true };
+      if (path === "/api/auth/me") return { id: "1", email: "gamer@example.com" };
+      throw new Error("Unexpected path");
+    });
+
+    const { getByTestId, getByText } = render(
+      <AuthProvider>
+        <TestComponent />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(getByTestId("user")).toHaveTextContent("gamer@example.com");
+    });
+
+    // Fail refresh first time
+    mockGetProxy.mockImplementationOnce(async (path) => {
+      if (path === "/api/auth/me") throw { name: "ApiRequestError", status: 503, detail: "Unavailable", code: "auth_unavailable" };
+      throw new Error("Unexpected");
+    });
+
+    await userEvent.click(getByText("Refresh"));
+    await waitFor(() => {
+      expect(getByTestId("globalError")).toHaveTextContent("Authentication service is temporarily unavailable. Please try again later.");
+      expect(getByTestId("globalErrorAction")).toHaveTextContent("refresh");
+    });
+
+    // Succeed on retry
+    mockGetProxy.mockImplementationOnce(async (path) => {
+      if (path === "/api/auth/me") return { id: "1", email: "gamer@example.com" };
+      throw new Error("Unexpected path");
+    });
+
+    await userEvent.click(getByText("Refresh"));
+    await waitFor(() => {
+      expect(getByTestId("globalError")).toHaveTextContent("none");
+      expect(getByTestId("globalErrorAction")).toHaveTextContent("none");
+    });
+  });
+
+  it("can retry logout after logout failure", async () => {
+    mockGetProxy.mockImplementation(async (path) => {
+      if (path === "/api/auth/refresh") return { has_session: true };
+      if (path === "/api/auth/me") return { id: "1", email: "gamer@example.com" };
+      throw new Error("Unexpected path");
+    });
+
+    // First logout fails
+    mockPostProxy.mockImplementationOnce(async (path) => {
+      if (path === "/api/auth/logout") throw { name: "ApiRequestError", status: 500, detail: "Logout failed", code: "local_logout_failed" };
+      throw new Error("Unexpected");
+    });
+
+    const { getByTestId, getByText } = render(
+      <AuthProvider>
+        <TestComponent />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(getByTestId("user")).toHaveTextContent("gamer@example.com");
+    });
+
+    await userEvent.click(getByText("Logout"));
+    await waitFor(() => {
+      expect(getByTestId("globalError")).toHaveTextContent("Logout failed. Please try again.");
+      expect(getByTestId("globalErrorAction")).toHaveTextContent("logout");
+    });
+
+    // Second logout succeeds
+    mockPostProxy.mockImplementationOnce(async (path) => {
+      if (path === "/api/auth/logout") return { logged_out: true, provider_session_revoked: false };
+      throw new Error("Unexpected");
+    });
+
+    await userEvent.click(getByText("Logout"));
+    await waitFor(() => {
+      expect(getByTestId("user")).toHaveTextContent("none");
+      expect(getByTestId("globalError")).toHaveTextContent("none");
+    });
+  });
+});
+
+describe("UserDashboard Component", () => {
+  const mockGetProxy = vi.mocked(apiClient.getProxy);
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("handles user with null email safely", async () => {
+    mockGetProxy.mockImplementation(async (path) => {
+      if (path === "/api/auth/refresh") return { has_session: true };
+      if (path === "/api/auth/me") return { id: "1", email: null };
+      throw new Error("Unexpected");
+    });
+
+    render(
+      <AuthProvider>
+        <UserDashboard />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Welcome, Gamer!")).toBeInTheDocument();
+      expect(screen.getByText("No email provided")).toBeInTheDocument();
+    });
+  });
+});

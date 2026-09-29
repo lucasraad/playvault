@@ -19,7 +19,7 @@ import { UserDashboard } from "@/components/auth/user-dashboard";
 type AuthView = "login" | "signup";
 
 export function AuthShell() {
-  const { user, loading } = useAuth();
+  const { user, loading, globalError, refreshUser, clearError } = useAuth();
   const [view, setView] = useState<AuthView>("login");
 
   // Initial session check
@@ -28,6 +28,26 @@ export function AuthShell() {
       <div className="auth-loading" role="status" id="auth-loading">
         <div className="auth-loading__spinner" aria-hidden="true" />
         <p className="auth-loading__text">Loading your profile…</p>
+      </div>
+    );
+  }
+
+  // Recoverable error on init (no user)
+  if (globalError && !user) {
+    return (
+      <div className="auth-page" id="auth-page">
+        <div className="auth-page__container">
+          <div className="auth-page__card" style={{ textAlign: "center", padding: "2rem" }}>
+            <h1 className="auth-form__title" style={{ marginBottom: "1rem" }}>Connection Error</h1>
+            <p className="auth-form__subtitle" style={{ marginBottom: "1.5rem", color: "#ef4444" }}>{globalError.message}</p>
+            <button 
+              onClick={() => { clearError(); refreshUser(); }} 
+              className="auth-form__submit"
+            >
+              Try Again
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

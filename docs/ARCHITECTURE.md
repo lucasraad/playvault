@@ -133,3 +133,47 @@ do Supabase. Revogação local/global no provedor é uma decisão de produto sep
 A ordem planejada é IGDB, Steam, Xbox, PlayStation e Nintendo. Steam será a
 primeira sincronização real de biblioteca. As demais plataformas exigem provas
 de conceito antes de serem tratadas como integrações estáveis.
+
+### Cliente interno IGDB (Task 005)
+
+`app.integrations.igdb.IGDBClient` é o limite interno entre a API e a IGDB. Ele
+não registra endpoints FastAPI e não persiste dados. A Task 006 poderá injetar um
+`httpx.AsyncClient` configurado com `IGDB_TIMEOUT_SECONDS` e chamar:
+
+```python
+await client.query(endpoint="games", apicalypse_query="fields id,name; limit 10;")
+```
+
+O retorno é `list[dict[str, Any]]`, somente depois de validar que o upstream
+respondeu uma lista de objetos JSON. O chamador deve selecionar explicitamente
+os campos na consulta APICalypse e converter a resposta em schemas próprios
+antes de expô-la por um endpoint público.
+
+Autenticação usa Client Credentials da Twitch exclusivamente no backend. O
+cliente guarda o app access token em memória até pouco antes de `expires_in` e,
+ao receber 401 da IGDB, obtém um token novo e repete a consulta uma única vez.
+App access tokens não possuem refresh token. Client ID, Client Secret e access
+token nunca devem ser retornados pelo FastAPI, registrados em logs ou colocados
+em variáveis `NEXT_PUBLIC_*`.
+
+Erros internos são tipados para a camada futura mapear sem revelar o corpo do
+provedor: `IGDBAuthenticationError`, `IGDBRateLimitError` (inclui
+`retry_after` quando numérico), `IGDBUnavailableError`,
+`IGDBInvalidResponseError` e `IGDBRequestError`. Timeouts, falhas de rede e 5xx
+são indisponibilidade. O orçamento oficial é de 4 requisições por segundo e até
+8 requisições simultâneas; uma implantação com múltiplas instâncias deverá
+coordenar cache e limitação fora deste cliente quando a Task 006 definir o
+endpoint público.
+
+Variáveis necessárias:
+
+- `IGDB_CLIENT_ID`;
+- `IGDB_CLIENT_SECRET`;
+- `IGDB_TIMEOUT_SECONDS` (opcional, padrão `10`).
+
+A [documentação oficial da IGDB](https://api-docs.igdb.com/) informa que a API é
+gratuita, mas um produto monetizado deve formalizar uma parceria comercial com a
+IGDB e exibir atribuição visível à IGDB.com. Essa autorização e a apresentação
+da atribuição são requisitos de produto antes de uso comercial; esta tarefa não
+concede nem presume licença comercial. O fluxo Client Credentials segue a
+[documentação oficial da Twitch](https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/).

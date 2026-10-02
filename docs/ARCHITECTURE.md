@@ -177,3 +177,119 @@ IGDB e exibir atribuição visível à IGDB.com. Essa autorização e a apresent
 da atribuição são requisitos de produto antes de uso comercial; esta tarefa não
 concede nem presume licença comercial. O fluxo Client Credentials segue a
 [documentação oficial da Twitch](https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/).
+
+### Busca de jogos (Task 006)
+
+Fluxo: `Browser → GET /api/catalog/games/search (Next.js) → GET
+/catalog/games/search (FastAPI) → IGDBClient → IGDB`. A rota BFF fica fora de
+`/api/auth`: os cookies `gp_at` e `gp_rt` continuam com `Path=/api/auth`, não são
+enviados para a busca e não tiveram escopo ampliado. A busca de catálogo é
+pública e somente leitura; o BFF não encaminha cookies de autenticação nem
+`Authorization`. Ela permanece protegida tanto no BFF quanto no FastAPI, pois a
+rota FastAPI também pode ser acessada diretamente.
+
+| Camada | Método e rota | Parâmetros |
+| --- | --- | --- |
+| Navegador/BFF | `GET /api/catalog/games/search` | `q` obrigatório, 2–80 caracteres; `limit` opcional, 1–20, padrão 10 |
+| FastAPI | `GET /catalog/games/search` | Mesmo contrato; não aceita corpo ou consulta APICalypse do cliente |
+
+O backend constrói uma consulta fixa ao endpoint IGDB `games`, exclui versões
+com `version_parent`, limita o resultado e seleciona explicitamente `id`,
+`name`, `slug`, `summary`, `first_release_date`, capa, plataformas e gêneros.
+Caracteres de controle de APICalypse (`"`, `;`, `\\`, `{`, `}`) não são aceitos
+na entrada pública.
+
+Resposta `200`:
+
+```json
+{
+  "query": "Halo",
+  "limit": 10,
+  "results": [
+    {
+      "igdb_id": 740,
+      "name": "Halo: Combat Evolved",
+      "slug": "halo-combat-evolved",
+      "summary": null,
+      "first_release_date": "2001-11-15",
+      "cover_url": null,
+      "platforms": [{"igdb_id": 11, "name": "Xbox", "abbreviation": "XBOX"}],
+      "genres": [{"igdb_id": 5, "name": "Shooter"}]
+    }
+  ]
+}
+```
+
+`summary`, `first_release_date`, `cover_url` e `platforms[].abbreviation` podem
+ser `null`; as listas podem ser vazias. `igdb_id` é uma referência externa e
+**não** é `games.id`, que continua sendo um UUID interno criado somente quando
+um fluxo futuro persistir um jogo. Buscar não cadastra jogo, não cria entrada de
+biblioteca e não escreve no banco.
+
+#### Proteção preventiva e cache
+
+Em produção, Next.js e FastAPI usam o **mesmo banco Upstash Redis**, acessado
+pela REST API, para que os limites sejam compartilhados entre todas as
+instâncias. Cache não substitui o orçamento global: apenas cache misses podem
+consumir esse orçamento e chamar a IGDB.
+
+- por visitante: 10 buscas em uma janela móvel de 60 segundos no BFF e também
+  no FastAPI, inclusive quando houver cache hit;
+- global: no máximo 4 cache misses por segundo em todas as instâncias e no
+  máximo 8 chamadas IGDB simultâneas, com lease de 15 segundos;
+- cache: resposta validada por consulta normalizada e `limit`, TTL de 60
+  segundos, compartilhado entre instâncias;
+- falha fechada: configuração ausente, timeout, resposta inválida ou
+  indisponibilidade do Redis devolve 503 `catalog_protection_unavailable` e a
+  IGDB não é chamada.
+
+O BFF cria `pv_catalog_visitor`, cookie assinado, `HttpOnly`, `SameSite=Lax`,
+`Secure` em produção e limitado a `Path=/api/catalog`. Ele encaminha ao FastAPI
+apenas o identificador assinado em `X-PlayVault-Catalog-Visitor`. Limpar o cookie
+pode reiniciar o orçamento por visitante no BFF; portanto esse limite é uma
+barreira de abuso de melhor esforço, enquanto o limite global é a proteção
+incontornável do orçamento IGDB.
+
+No acesso direto, o FastAPI aceita esse identificador somente com assinatura
+válida; caso contrário deriva a identidade de `request.client.host`. O código
+deliberadamente ignora `X-Forwarded-For` fornecido pelo cliente. Em uma
+implantação atrás de proxy, a infraestrutura ASGI deve aceitar informações do
+proxy somente de endereços confiáveis; sem essa configuração, visitantes podem
+ser agrupados no endereço do proxy (restrição excessiva), mas não escolher um
+IP arbitrário para contornar o limite.
+
+Variáveis obrigatórias em produção, com os mesmos valores/recursos no Vercel e
+no Railway:
+
+- `APP_ENVIRONMENT=production` no FastAPI;
+- `CATALOG_VISITOR_SECRET`, segredo aleatório com ao menos 32 caracteres;
+- `UPSTASH_REDIS_REST_URL`;
+- `UPSTASH_REDIS_REST_TOKEN`;
+- `CATALOG_STORE_TIMEOUT_SECONDS` opcional no FastAPI, padrão 2 segundos.
+
+A integração do Upstash pelo Marketplace da Vercel injeta variáveis apenas no
+projeto Vercel; URL e token devem ser configurados separadamente no Railway,
+apontando para o mesmo banco. Enquanto qualquer item estiver ausente, a busca
+pública fica desabilitada em produção por falha fechada. Somente quando
+`APP_ENVIRONMENT` for explicitamente `development` ou `test` é permitido
+armazenamento em memória, que vale para uma única instância e não representa a
+proteção de produção. O padrão seguro é `production`.
+
+Erros públicos estáveis:
+
+| Status | `code` | Situação |
+| --- | --- | --- |
+| 400 | `invalid_search` | entrada rejeitada pelo BFF ou serviço |
+| 422 | validação FastAPI | parâmetro ausente ou fora dos limites no acesso direto à API |
+| 429 | `catalog_visitor_rate_limited` | orçamento do visitante esgotado |
+| 429 | `catalog_global_rate_limited` | orçamento global ou concorrência esgotados |
+| 429 | `catalog_upstream_rate_limited` | limite devolvido pela IGDB |
+| 502 | `invalid_catalog_response` | sucesso upstream com schema inválido |
+| 502 | `catalog_upstream_error` | outra rejeição ou erro inesperado do backend |
+| 503 | `catalog_unavailable` | credenciais ausentes/rejeitadas, timeout, rede ou 5xx |
+| 503 | `catalog_protection_unavailable` | proteção compartilhada ausente ou indisponível |
+
+O frontend consome `searchGames` de `api-client.ts`. A URL interna do FastAPI
+deve usar `API_URL` no servidor Next.js; `NEXT_PUBLIC_API_URL` permanece apenas
+como fallback de compatibilidade. Nenhuma resposta contém credenciais, app
+token, consulta APICalypse ou payload bruto da IGDB.

@@ -36,6 +36,35 @@ export interface AuthUser {
   email: string | null;
 }
 
+export interface GameSearchPlatform {
+  igdb_id: number;
+  name: string;
+  abbreviation: string | null;
+}
+
+export interface GameSearchGenre {
+  igdb_id: number;
+  name: string;
+}
+
+export interface GameSearchResult {
+  /** External catalog reference. This is not the internal games.id UUID. */
+  igdb_id: number;
+  name: string;
+  slug: string;
+  summary: string | null;
+  first_release_date: string | null;
+  cover_url: string | null;
+  platforms: GameSearchPlatform[];
+  genres: GameSearchGenre[];
+}
+
+export interface GameSearchResponse {
+  query: string;
+  limit: number;
+  results: GameSearchResult[];
+}
+
 /* ---------- Helpers ---------- */
 
 export class ApiRequestError extends Error {
@@ -151,6 +180,15 @@ export async function getProxy<T>(path: string): Promise<T> {
 
   if (!res.ok) throw await parseErrorResponse(res);
   return res.json() as Promise<T>;
+}
+
+/** Search the external catalog through the Next.js BFF. Does not persist games. */
+export async function searchGames(
+  query: string,
+  limit = 10,
+): Promise<GameSearchResponse> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  return getProxy<GameSearchResponse>(`/api/catalog/games/search?${params}`);
 }
 
 /**

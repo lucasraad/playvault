@@ -73,6 +73,8 @@ export class ApiRequestError extends Error {
     public readonly detail: string,
     public readonly code?: string,
     public readonly validationErrors?: ValidationError[],
+    /** Seconds to wait before retrying, when provided by the server. */
+    public readonly retryAfter?: number,
   ) {
     super(detail);
     this.name = "ApiRequestError";
@@ -87,7 +89,16 @@ async function parseErrorResponse(res: Response): Promise<ApiRequestError> {
     return new ApiRequestError(res.status, res.statusText || "Request failed");
   }
 
-  const parsed = (body || {}) as { detail?: unknown; code?: string };
+  const parsed = (body || {}) as {
+    detail?: unknown;
+    code?: string;
+    retry_after?: unknown;
+  };
+
+  const retryAfter =
+    typeof parsed.retry_after === "number" && parsed.retry_after > 0
+      ? parsed.retry_after
+      : undefined;
 
   // FastAPI 422 returns { detail: [ { loc, msg, type } ] }
   if (res.status === 422 && Array.isArray(parsed.detail)) {
@@ -96,6 +107,7 @@ async function parseErrorResponse(res: Response): Promise<ApiRequestError> {
       "Validation failed",
       parsed.code,
       parsed.detail as ValidationError[],
+      retryAfter,
     );
   }
 
@@ -103,7 +115,7 @@ async function parseErrorResponse(res: Response): Promise<ApiRequestError> {
     typeof parsed.detail === "string"
       ? parsed.detail
       : "An unexpected error occurred";
-  return new ApiRequestError(res.status, detail, parsed.code);
+  return new ApiRequestError(res.status, detail, parsed.code, undefined, retryAfter);
 }
 
 /* ---------- Public API ---------- */

@@ -236,7 +236,8 @@ consumir esse orçamento e chamar a IGDB.
 - por visitante: 10 buscas em uma janela móvel de 60 segundos no BFF e também
   no FastAPI, inclusive quando houver cache hit;
 - global: no máximo 4 cache misses por segundo em todas as instâncias e no
-  máximo 8 chamadas IGDB simultâneas, com lease de 15 segundos;
+  máximo 8 chamadas IGDB simultâneas. Cada chamada adquire um lease de 15
+  segundos, renovado a cada 5 segundos enquanto permanecer em andamento;
 - cache: resposta validada por consulta normalizada e `limit`, TTL de 60
   segundos, compartilhado entre instâncias;
 - falha fechada: configuração ausente, timeout, resposta inválida ou

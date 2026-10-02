@@ -15,6 +15,7 @@ from app.api.catalog import router as catalog_router
 from app.core.auth import AuthUnavailable
 from app.core.catalog_protection import (
     CatalogProtection,
+    CatalogProtectionUnavailable,
     InMemoryCatalogProtectionStore,
     UpstashCatalogProtectionStore,
 )
@@ -80,6 +81,21 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 app.include_router(catalog_router)
+
+
+@app.exception_handler(CatalogProtectionUnavailable)
+def catalog_protection_unavailable_handler(
+    request: Request,
+    exc: CatalogProtectionUnavailable,
+) -> JSONResponse:
+    del request, exc
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={
+            "code": "catalog_protection_unavailable",
+            "detail": "Game search protection unavailable",
+        },
+    )
 
 
 @app.exception_handler(AuthUnavailable)

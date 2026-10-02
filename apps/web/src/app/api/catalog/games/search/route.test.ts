@@ -90,6 +90,13 @@ describe("GET /api/catalog/games/search", () => {
 
   it.each([
     [429, { code: "catalog_global_rate_limited", detail: "Rate limited", retry_after: 2 }],
+    [
+      503,
+      {
+        code: "catalog_protection_unavailable",
+        detail: "Game search protection unavailable",
+      },
+    ],
     [503, { code: "catalog_unavailable", detail: "Unavailable" }],
     [502, { code: "invalid_catalog_response", detail: "Invalid response" }],
   ])("forwards the documented %i catalog error", async (status, body) => {

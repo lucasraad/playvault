@@ -27,6 +27,25 @@ async def test_releasing_lease_restores_concurrency_capacity() -> None:
 
 
 @pytest.mark.anyio
+async def test_renewed_long_running_leases_continue_to_count_toward_limit() -> None:
+    now = 0.0
+    store = InMemoryCatalogProtectionStore(clock=lambda: now)
+    leases = [await store.acquire("igdb", 8, 15) for _ in range(8)]
+    assert all(lease is not None for lease in leases)
+
+    now = 10.0
+    for lease in leases:
+        assert lease is not None
+        assert await store.renew("igdb", lease, 15) is True
+
+    now = 20.0
+    assert await store.acquire("igdb", 8, 15) is None
+
+    now = 26.0
+    assert await store.acquire("igdb", 8, 15) is not None
+
+
+@pytest.mark.anyio
 async def test_rate_limits_are_independent_by_key() -> None:
     store = InMemoryCatalogProtectionStore()
 

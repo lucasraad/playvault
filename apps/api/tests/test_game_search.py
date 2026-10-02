@@ -277,6 +277,25 @@ def test_search_fails_closed_when_protection_store_is_unavailable() -> None:
     assert fake.calls == []
 
 
+def test_search_fails_closed_when_protection_dependency_is_unavailable() -> None:
+    fake = FakeIGDBClient([{"id": 1, "name": "Halo", "slug": "halo"}])
+    use_igdb(fake)
+
+    def unavailable_protection() -> None:
+        raise CatalogProtectionUnavailable("not configured")
+
+    app.dependency_overrides[get_catalog_protection] = unavailable_protection
+
+    response = client.get("/catalog/games/search", params={"q": "Halo"})
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "catalog_protection_unavailable",
+        "detail": "Game search protection unavailable",
+    }
+    assert fake.calls == []
+
+
 def test_search_is_unavailable_without_igdb_configuration() -> None:
     response = client.get("/catalog/games/search", params={"q": "Halo"})
 

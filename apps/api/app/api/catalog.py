@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import suppress
 from typing import Annotated
 
@@ -6,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.catalog_protection import (
     CatalogProtection,
+    CatalogProtectionStore,
     CatalogProtectionUnavailable,
     cache_key,
     get_catalog_protection,
@@ -92,6 +94,16 @@ async def game_search(
                 "Game catalog concurrency limit exceeded",
                 1.0,
             )
+        stop_renewal = asyncio.Event()
+        renewal_task = asyncio.create_task(
+            _renew_lease_until_stopped(
+                protection.store,
+                GLOBAL_CONCURRENCY_KEY,
+                lease_id,
+                GLOBAL_LEASE_SECONDS,
+                stop_renewal,
+            )
+        )
         try:
             result = await search_games(client, normalized, limit)
             await protection.store.set(
@@ -101,8 +113,12 @@ async def game_search(
             )
             return result
         finally:
-            with suppress(CatalogProtectionUnavailable):
-                await protection.store.release(GLOBAL_CONCURRENCY_KEY, lease_id)
+            stop_renewal.set()
+            try:
+                await renewal_task
+            finally:
+                with suppress(CatalogProtectionUnavailable):
+                    await protection.store.release(GLOBAL_CONCURRENCY_KEY, lease_id)
     except ValueError:
         return _error_response(400, "invalid_search", "Invalid game search query")
     except CatalogProtectionUnavailable:
@@ -134,3 +150,20 @@ def _rate_limit_response(code: str, detail: str, retry_after: float | None) -> J
     if retry_after is not None:
         payload["retry_after"] = retry_after
     return JSONResponse(status_code=429, content=payload)
+
+
+async def _renew_lease_until_stopped(
+    store: CatalogProtectionStore,
+    key: str,
+    lease_id: str,
+    lease_seconds: float,
+    stop: asyncio.Event,
+) -> None:
+    interval = lease_seconds / 3
+    while True:
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+            return
+        except TimeoutError:
+            if not await store.renew(key, lease_id, lease_seconds):
+                raise CatalogProtectionUnavailable("Catalog concurrency lease was lost")

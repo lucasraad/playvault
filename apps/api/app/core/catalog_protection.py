@@ -37,6 +37,15 @@ redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[1]))
 return 1
 """.strip()
 
+RENEW_SCRIPT = """
+if redis.call('ZSCORE', KEYS[1], ARGV[2]) == false then return 0 end
+local now_parts = redis.call('TIME')
+local now = (tonumber(now_parts[1]) * 1000) + math.floor(tonumber(now_parts[2]) / 1000)
+redis.call('ZADD', KEYS[1], now, ARGV[2])
+redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[1]))
+return 1
+""".strip()
+
 
 class CatalogProtectionUnavailable(RuntimeError):
     """The shared protection store is missing or unreachable."""
@@ -56,6 +65,8 @@ class CatalogProtectionStore(Protocol):
     async def set(self, key: str, value: str, ttl_seconds: int) -> None: ...
 
     async def acquire(self, key: str, limit: int, lease_seconds: float) -> str | None: ...
+
+    async def renew(self, key: str, lease_id: str, lease_seconds: float) -> bool: ...
 
     async def release(self, key: str, lease_id: str) -> None: ...
 
@@ -118,6 +129,21 @@ class UpstashCatalogProtectionStore:
         result = await self._command(["ZREM", key, lease_id])
         if not isinstance(result, int):
             raise CatalogProtectionUnavailable("Invalid concurrency store response")
+
+    async def renew(self, key: str, lease_id: str, lease_seconds: float) -> bool:
+        result = await self._command(
+            [
+                "EVAL",
+                RENEW_SCRIPT,
+                1,
+                key,
+                int(lease_seconds * 1000),
+                lease_id,
+            ]
+        )
+        if result not in {0, 1}:
+            raise CatalogProtectionUnavailable("Invalid concurrency store response")
+        return result == 1
 
     async def _command(self, command: list[object]) -> Any:
         try:
@@ -187,6 +213,16 @@ class InMemoryCatalogProtectionStore:
     async def release(self, key: str, lease_id: str) -> None:
         async with self._lock:
             self._leases[key].pop(lease_id, None)
+
+    async def renew(self, key: str, lease_id: str, lease_seconds: float) -> bool:
+        async with self._lock:
+            leases = self._leases[key]
+            expires_at = leases.get(lease_id)
+            if expires_at is None or expires_at <= self._clock():
+                leases.pop(lease_id, None)
+                return False
+            leases[lease_id] = self._clock() + lease_seconds
+            return True
 
 
 @dataclass(frozen=True)

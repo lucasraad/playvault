@@ -82,6 +82,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         "X-PlayVault-Catalog-Visitor": visitor.signedId,
       },
       cache: "no-store",
+      signal: request.signal,
     });
     const payload: unknown = await upstream.json().catch(() => null);
 

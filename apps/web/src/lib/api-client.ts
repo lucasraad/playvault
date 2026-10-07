@@ -183,11 +183,12 @@ export async function postProxy<T>(
  * GET from the Next.js proxy routes (/api/auth/*).
  * Used by client components. Cookies are sent automatically.
  */
-export async function getProxy<T>(path: string): Promise<T> {
+export async function getProxy<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(path, {
     method: "GET",
     credentials: "same-origin",
     cache: "no-store",
+    signal,
   });
 
   if (!res.ok) throw await parseErrorResponse(res);
@@ -198,9 +199,10 @@ export async function getProxy<T>(path: string): Promise<T> {
 export async function searchGames(
   query: string,
   limit = 10,
+  signal?: AbortSignal,
 ): Promise<GameSearchResponse> {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
-  return getProxy<GameSearchResponse>(`/api/catalog/games/search?${params}`);
+  return getProxy<GameSearchResponse>(`/api/catalog/games/search?${params}`, signal);
 }
 
 /**

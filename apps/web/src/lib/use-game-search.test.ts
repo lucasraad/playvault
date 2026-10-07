@@ -57,7 +57,7 @@ describe("useGameSearch", () => {
       vi.advanceTimersByTime(300);
     });
 
-    expect(mockSearchGames).toHaveBeenCalledWith("zel");
+    expect(mockSearchGames).toHaveBeenCalledWith("zel", 10, expect.any(AbortSignal));
     expect(mockSearchGames).toHaveBeenCalledTimes(1);
 
     // 2. User types "zelda" (Search B) before A resolves
@@ -104,7 +104,7 @@ describe("useGameSearch", () => {
       vi.advanceTimersByTime(300);
     });
 
-    expect(mockSearchGames).toHaveBeenCalledWith("zelda");
+    expect(mockSearchGames).toHaveBeenCalledWith("zelda", 10, expect.any(AbortSignal));
     expect(mockSearchGames).toHaveBeenCalledTimes(2);
 
     await act(async () => {
@@ -161,5 +161,23 @@ describe("useGameSearch", () => {
 
     // The API should never have been called because the component unmounted
     expect(mockSearchGames).not.toHaveBeenCalled();
+  });
+
+  it("should abort an in-flight request on unmount", () => {
+    let signal: AbortSignal | undefined;
+    mockSearchGames.mockImplementation((_query, _limit, requestSignal) => {
+      signal = requestSignal;
+      return new Promise<GameSearchResponse>(() => undefined);
+    });
+    const { result, unmount } = renderHook(() => useGameSearch());
+
+    act(() => {
+      result.current.search("zelda");
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(signal?.aborted).toBe(false);
+    unmount();
+    expect(signal?.aborted).toBe(true);
   });
 });

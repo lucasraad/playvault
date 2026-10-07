@@ -868,6 +868,10 @@ body {
   font-weight: 400;
 }
 
+.search__input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
 .search__input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-glow);

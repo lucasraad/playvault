@@ -147,6 +147,7 @@ export function useGameSearch() {
   // Monotonic counter to prevent stale responses from overwriting fresh ones.
   const requestIdRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const controllerRef = useRef<AbortController | null>(null);
 
   // Clear timeout on unmount
   useEffect(() => {
@@ -154,6 +155,9 @@ export function useGameSearch() {
       if (timerRef.current !== null) {
         clearTimeout(timerRef.current);
       }
+      controllerRef.current?.abort();
+      controllerRef.current = null;
+      requestIdRef.current += 1;
     };
   }, []);
 
@@ -166,6 +170,10 @@ export function useGameSearch() {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+
+    // Stop an already-started request when the query changes.
+    controllerRef.current?.abort();
+    controllerRef.current = null;
 
     // Invalidate any in-flight request immediately
     requestIdRef.current += 1;
@@ -182,8 +190,11 @@ export function useGameSearch() {
 
     // Debounce the actual API call
     timerRef.current = setTimeout(async () => {
+      timerRef.current = null;
+      const controller = new AbortController();
+      controllerRef.current = controller;
       try {
-        const response: GameSearchResponse = await searchGames(query);
+        const response: GameSearchResponse = await searchGames(query, 10, controller.signal);
 
         // Only update state if this is still the latest request
         if (thisRequestId !== requestIdRef.current) return;
@@ -214,6 +225,10 @@ export function useGameSearch() {
           results: [],
           error: searchError,
         });
+      } finally {
+        if (controllerRef.current === controller) {
+          controllerRef.current = null;
+        }
       }
     }, DEBOUNCE_MS);
   }, []);
@@ -223,6 +238,8 @@ export function useGameSearch() {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    controllerRef.current?.abort();
+    controllerRef.current = null;
     requestIdRef.current += 1;
     setState(INITIAL_STATE);
   }, []);

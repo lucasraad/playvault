@@ -10,7 +10,9 @@ import type { GameSearchResponse } from "@/lib/api-client";
 
 /* ---------- Mock api-client ---------- */
 
-const mockSearchGames = vi.fn<(query: string, limit?: number) => Promise<GameSearchResponse>>();
+const mockSearchGames = vi.fn<
+  (query: string, limit?: number, signal?: AbortSignal) => Promise<GameSearchResponse>
+>();
 
 vi.mock("@/lib/api-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api-client")>();

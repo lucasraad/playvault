@@ -9,7 +9,7 @@
  * the latest request.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ApiRequestError,
@@ -148,6 +148,15 @@ export function useGameSearch() {
   const requestIdRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Clear timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
+
   const search = useCallback((rawQuery: string) => {
     const query = rawQuery.trim();
     setState((prev) => ({ ...prev, query: rawQuery }));
@@ -158,10 +167,12 @@ export function useGameSearch() {
       timerRef.current = null;
     }
 
+    // Invalidate any in-flight request immediately
+    requestIdRef.current += 1;
+    const thisRequestId = requestIdRef.current;
+
     // If query is too short, reset to idle
     if (query.length < 2) {
-      // Increment to discard any in-flight request
-      requestIdRef.current += 1;
       setState({ status: "idle", query: rawQuery, results: [], error: null });
       return;
     }
@@ -171,8 +182,6 @@ export function useGameSearch() {
 
     // Debounce the actual API call
     timerRef.current = setTimeout(async () => {
-      const thisRequestId = ++requestIdRef.current;
-
       try {
         const response: GameSearchResponse = await searchGames(query);
 

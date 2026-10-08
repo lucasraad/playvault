@@ -246,8 +246,12 @@ function IgdbAttribution() {
 
 /* ---------- Main component ---------- */
 
-export function GameSearch() {
-  const { status, query, results, error, search, clear } = useGameSearch();
+export function GameSearch({
+  fetcher,
+}: {
+  fetcher?: Parameters<typeof useGameSearch>[0];
+} = {}) {
+  const { status, query, results, error, search, clear } = useGameSearch(fetcher);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleChange = useCallback(

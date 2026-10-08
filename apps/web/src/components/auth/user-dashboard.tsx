@@ -3,10 +3,15 @@
 import { useState } from "react";
 import { useAuth } from "@/context/auth-context";
 import { GameSearch } from "@/components/catalog/game-search";
+import { useGameSearch } from "@/lib/use-game-search";
 
 type DashboardTab = "home" | "search";
 
-export function UserDashboard() {
+export function UserDashboard({
+  searchFetcher,
+}: {
+  searchFetcher?: Parameters<typeof useGameSearch>[0];
+} = {}) {
   const { user, logout, loading, globalError, clearError, refreshUser } = useAuth();
   const [activeTab, setActiveTab] = useState<DashboardTab>("home");
 
@@ -219,7 +224,7 @@ export function UserDashboard() {
           </>
         )}
 
-        {activeTab === "search" && <GameSearch />}
+        {activeTab === "search" && <GameSearch fetcher={searchFetcher} />}
       </main>
     </div>
   );

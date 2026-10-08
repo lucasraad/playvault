@@ -141,7 +141,7 @@ const DEBOUNCE_MS = 300;
 
 /* ---------- Hook ---------- */
 
-export function useGameSearch() {
+export function useGameSearch(fetcher: typeof searchGames = searchGames) {
   const [state, setState] = useState<GameSearchState>(INITIAL_STATE);
 
   // Monotonic counter to prevent stale responses from overwriting fresh ones.
@@ -194,7 +194,7 @@ export function useGameSearch() {
       const controller = new AbortController();
       controllerRef.current = controller;
       try {
-        const response: GameSearchResponse = await searchGames(query, 10, controller.signal);
+        const response: GameSearchResponse = await fetcher(query, 10, controller.signal);
 
         // Only update state if this is still the latest request
         if (thisRequestId !== requestIdRef.current) return;
@@ -231,7 +231,7 @@ export function useGameSearch() {
         }
       }
     }, DEBOUNCE_MS);
-  }, []);
+  }, [fetcher]);
 
   const clear = useCallback(() => {
     if (timerRef.current !== null) {

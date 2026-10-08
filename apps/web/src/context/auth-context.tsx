@@ -115,7 +115,7 @@ function getGlobalErrorMessage(error: AuthFailure | null, defaultMessage: string
   return defaultMessage;
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+export const AuthContext = createContext<AuthContextValue | null>(null);
 
 /* ---------- Provider ---------- */
 

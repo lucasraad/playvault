@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { GameSearch } from "@/components/catalog/game-search";
+import { useMemo, useState } from "react";
+import { UserDashboard } from "@/components/auth/user-dashboard";
+import { AuthContext } from "@/context/auth-context";
+import type { GameSearchResponse } from "@/lib/api-client";
+import { ApiRequestError } from "@/lib/api-client";
 
 const MOCK_RESULTS = [
   {
@@ -46,91 +49,71 @@ const MOCK_RESULTS = [
   }
 ];
 
+function delayWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      return reject(new DOMException("Aborted", "AbortError"));
+    }
+    const timeout = setTimeout(resolve, ms);
+    if (signal) {
+      signal.addEventListener("abort", () => {
+        clearTimeout(timeout);
+        reject(new DOMException("Aborted", "AbortError"));
+      }, { once: true });
+    }
+  });
+}
+
 export default function DemoPage() {
-  const [mounted, setMounted] = useState(false);
+  const [errorCount, setErrorCount] = useState(0);
 
-  useEffect(() => {
-    const originalFetch = window.fetch;
-    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const urlStr = input instanceof Request ? input.url : input.toString();
-      
-      if (urlStr.includes("/api/catalog/games/search")) {
-        const urlObj = new URL(urlStr, window.location.origin);
-        const query = urlObj.searchParams.get("q") || "";
-        
-        // Fake network delay
-        await new Promise((resolve) => setTimeout(resolve, 800));
+  const mockFetcher = async (query: string, limit = 10, signal?: AbortSignal): Promise<GameSearchResponse> => {
+    await delayWithSignal(800, signal);
 
-        // Test error
-        if (query.toLowerCase() === "error") {
-          return new Response(JSON.stringify({ detail: "Simulated error for demo purposes. Try another term." }), { 
-            status: 500, 
-            statusText: "Internal Server Error",
-            headers: { "Content-Type": "application/json" }
-          });
-        }
-        
-        // Test empty
-        if (query.toLowerCase() === "vazia" || query.toLowerCase() === "empty") {
-          return new Response(JSON.stringify({ query, limit: 10, results: [] }), { 
-            status: 200, 
-            headers: { "Content-Type": "application/json" } 
-          });
-        }
-
-        // Return mock data filtered by query (or all if query is generic)
-        const filtered = MOCK_RESULTS.filter(r => r.name.toLowerCase().includes(query.toLowerCase()));
-        
-        return new Response(JSON.stringify({
+    if (query.toLowerCase() === "error") {
+      // Allow testing retry recovery: alternate between error and success
+      if (errorCount % 2 === 0) {
+        setErrorCount((c) => c + 1);
+        throw new ApiRequestError(500, "Simulated error for demo purposes. Click 'Try again' to recover.");
+      } else {
+        setErrorCount((c) => c + 1);
+        // Recover with mock results
+        return {
           query,
-          limit: 10,
-          results: filtered.length > 0 ? filtered : MOCK_RESULTS
-        }), { 
-          status: 200, 
-          headers: { "Content-Type": "application/json" } 
-        });
+          limit,
+          results: MOCK_RESULTS.slice(0, 1),
+        };
       }
+    }
 
-      return originalFetch(input, init);
+    const filtered = MOCK_RESULTS.filter((r) => r.name.toLowerCase().includes(query.toLowerCase()));
+
+    // "Uma busca sem correspondência deve retornar vazio de verdade"
+    return {
+      query,
+      limit,
+      results: filtered,
     };
+  };
 
-    const t = setTimeout(() => setMounted(true), 0);
-
-    return () => {
-      window.fetch = originalFetch;
-      clearTimeout(t);
-    };
-  }, []);
-
-  if (!mounted) return null;
+  const mockAuthContext = useMemo(() => ({
+    user: { id: "00000000-0000-0000-0000-000000000000", email: "demo@playvault.mock" },
+    loading: false,
+    error: null,
+    globalError: null,
+    login: async () => {},
+    signup: async () => ({ message: "success" }),
+    logout: async () => {},
+    refreshUser: async () => {},
+    clearError: () => {},
+  }), []);
 
   return (
-    <div className="dashboard" id="demo-dashboard">
-      <header className="dashboard__header">
-        <div className="dashboard__brand">
-          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" className="dashboard__logo" aria-hidden="true">
-            <rect width="28" height="28" rx="6" fill="#7c5cff" />
-            <path d="M8 18V10a4 4 0 014-4h4a4 4 0 014 4v4a4 4 0 01-4 4h-2l-3 4v-4H8z" fill="white" fillOpacity="0.9" />
-          </svg>
-          <span className="dashboard__brand-name">Gamer Profile (Demo)</span>
-        </div>
-        <nav className="dashboard__nav" aria-label="Main navigation">
-          <button className="dashboard__nav-tab dashboard__nav-tab--active" aria-current="page" id="nav-search-demo">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-              <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" />
-              <path d="M12.5 12.5L16 16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-            <span>Search</span>
-          </button>
-        </nav>
-        <div className="dashboard__user-area">
-          <div className="dashboard__avatar" aria-hidden="true">D</div>
-          <button className="dashboard__logout" disabled id="demo-user-badge">Demo User</button>
-        </div>
-      </header>
-      <main className="dashboard__main">
-        <GameSearch />
-      </main>
-    </div>
+    <AuthContext.Provider value={mockAuthContext}>
+      <div className="demo-banner" style={{ background: "#f59e0b", color: "#fff", textAlign: "center", padding: "4px", fontSize: "14px", fontWeight: "bold" }}>
+        Demo Mode: Using mock data (Not affiliated with IGDB)
+      </div>
+      <UserDashboard searchFetcher={mockFetcher} />
+    </AuthContext.Provider>
   );
 }

@@ -43,6 +43,7 @@ describe("DemoPage", () => {
     render(<RootLayout><DemoPage /></RootLayout>);
     expect(screen.getByText(/Demo Mode: Using mock data/i)).toBeInTheDocument();
     expect(screen.getByText(/Welcome, demo/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
   });
 
   it("allows navigation between Home and Search without real calls", async () => {
@@ -100,6 +101,9 @@ describe("DemoPage", () => {
     // Should find Mock Effect and no real API calls
     expect(screen.getByText("Mock Effect")).toBeInTheDocument();
     expect(screen.queryByText("The Legend of Mock")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Game data provided by/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "IGDB.com" })).not.toBeInTheDocument();
+    expect(screen.getByText("Mock data for demonstration purposes only")).toBeInTheDocument();
     expect(mockSearchGames).not.toHaveBeenCalled();
   });
 

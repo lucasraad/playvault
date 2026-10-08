@@ -113,7 +113,7 @@ export default function DemoPage() {
       <div className="demo-banner" style={{ background: "#f59e0b", color: "#fff", textAlign: "center", padding: "4px", fontSize: "14px", fontWeight: "bold" }}>
         Demo Mode: Using mock data (Not affiliated with IGDB)
       </div>
-      <UserDashboard searchFetcher={mockFetcher} />
+      <UserDashboard searchFetcher={mockFetcher} isDemo />
     </AuthContext.Provider>
   );
 }

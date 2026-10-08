@@ -1,7 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -22,6 +23,14 @@ class Settings(BaseSettings):
     supabase_url: str | None = None
     supabase_publishable_key: str | None = None
     web_origin: str = "http://localhost:3000"
+    igdb_client_id: str | None = None
+    igdb_client_secret: SecretStr | None = None
+    igdb_timeout_seconds: float = Field(default=10.0, gt=0)
+    app_environment: Literal["development", "test", "production"] = "production"
+    catalog_visitor_secret: SecretStr | None = None
+    upstash_redis_rest_url: str | None = None
+    upstash_redis_rest_token: SecretStr | None = None
+    catalog_store_timeout_seconds: float = Field(default=2.0, gt=0)
 
     @field_validator("database_url")
     @classmethod

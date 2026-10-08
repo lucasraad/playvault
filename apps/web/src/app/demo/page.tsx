@@ -13,7 +13,7 @@ const MOCK_RESULTS = [
     slug: "legend-of-mock",
     summary: "A mock game for testing.",
     first_release_date: "2023-01-01",
-    cover_url: "https://placehold.co/264x352/7c5cff/white?text=Legend+of+Mock",
+    cover_url: null,
     platforms: [{ igdb_id: 1, name: "PC", abbreviation: "PC" }],
     genres: [{ igdb_id: 1, name: "Adventure" }]
   },
@@ -33,7 +33,7 @@ const MOCK_RESULTS = [
     slug: "mockcraft",
     summary: "Build mock things.",
     first_release_date: "2011-11-11",
-    cover_url: "https://placehold.co/264x352/22d3ee/white?text=Mockcraft",
+    cover_url: null,
     platforms: [{ igdb_id: 1, name: "PC", abbreviation: "PC" }],
     genres: [{ igdb_id: 3, name: "Sandbox" }]
   },
@@ -43,7 +43,7 @@ const MOCK_RESULTS = [
     slug: "grand-theft-mock-v",
     summary: "Mock around the city.",
     first_release_date: "2013-09-17",
-    cover_url: "https://placehold.co/264x352/ef4444/white?text=GTM+V",
+    cover_url: null,
     platforms: [{ igdb_id: 3, name: "Xbox Series X", abbreviation: "XSX" }],
     genres: [{ igdb_id: 4, name: "Action" }]
   }

@@ -10,6 +10,10 @@ const mockSearchGames = vi.fn();
 const mockGetProxy = vi.fn();
 const mockPostProxy = vi.fn();
 
+vi.mock("next/font/google", () => ({
+  Inter: () => ({ variable: "mocked-inter" }),
+}));
+
 vi.mock("@/lib/api-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api-client")>();
   return {
@@ -21,6 +25,7 @@ vi.mock("@/lib/api-client", async (importOriginal) => {
 });
 
 import DemoPage from "./page";
+import RootLayout from "../layout";
 
 describe("DemoPage", () => {
   beforeEach(() => {
@@ -35,13 +40,13 @@ describe("DemoPage", () => {
   });
 
   it("renders the demo layout and identifies as mock data", () => {
-    render(<DemoPage />);
+    render(<RootLayout><DemoPage /></RootLayout>);
     expect(screen.getByText(/Demo Mode: Using mock data/i)).toBeInTheDocument();
     expect(screen.getByText(/Welcome, demo/i)).toBeInTheDocument();
   });
 
   it("allows navigation between Home and Search without real calls", async () => {
-    render(<DemoPage />);
+    render(<RootLayout><DemoPage /></RootLayout>);
     
     // Initially on Home tab
     expect(screen.getByText(/Welcome, demo!/i)).toBeInTheDocument();
@@ -60,7 +65,7 @@ describe("DemoPage", () => {
   });
 
   it("handles search and cancellation correctly", async () => {
-    render(<DemoPage />);
+    render(<RootLayout><DemoPage /></RootLayout>);
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     
     // Go to search
@@ -99,7 +104,7 @@ describe("DemoPage", () => {
   });
 
   it("returns empty state for unmatched queries", async () => {
-    render(<DemoPage />);
+    render(<RootLayout><DemoPage /></RootLayout>);
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     
     await user.click(screen.getByRole("button", { name: "Search" }));
@@ -113,7 +118,7 @@ describe("DemoPage", () => {
   });
 
   it("demonstrates error and recovery", async () => {
-    render(<DemoPage />);
+    render(<RootLayout><DemoPage /></RootLayout>);
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     
     await user.click(screen.getByRole("button", { name: "Search" }));

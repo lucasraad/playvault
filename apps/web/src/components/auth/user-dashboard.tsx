@@ -9,8 +9,10 @@ type DashboardTab = "home" | "search";
 
 export function UserDashboard({
   searchFetcher,
+  isDemo,
 }: {
   searchFetcher?: Parameters<typeof useGameSearch>[0];
+  isDemo?: boolean;
 } = {}) {
   const { user, logout, loading, globalError, clearError, refreshUser } = useAuth();
   const [activeTab, setActiveTab] = useState<DashboardTab>("home");
@@ -99,14 +101,16 @@ export function UserDashboard({
           <div className="dashboard__avatar" aria-hidden="true">
             {avatarLetter}
           </div>
-          <button
-            className="dashboard__logout"
-            onClick={logout}
-            disabled={loading}
-            id="logout-button"
-          >
-            Sign out
-          </button>
+          {!isDemo && (
+            <button
+              className="dashboard__logout"
+              onClick={logout}
+              disabled={loading}
+              id="logout-button"
+            >
+              Sign out
+            </button>
+          )}
         </div>
       </header>
 
@@ -224,7 +228,7 @@ export function UserDashboard({
           </>
         )}
 
-        {activeTab === "search" && <GameSearch fetcher={searchFetcher} />}
+        {activeTab === "search" && <GameSearch fetcher={searchFetcher} isDemo={isDemo} />}
       </main>
     </div>
   );

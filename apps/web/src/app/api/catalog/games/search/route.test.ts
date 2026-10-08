@@ -57,8 +57,9 @@ describe("GET /api/catalog/games/search", () => {
 
   it("forwards only validated parameters and returns the stable schema", async () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse(result));
+    const browserRequest = request("q=%20Halo%20&limit=10");
 
-    const response = await GET(request("q=%20Halo%20&limit=10"));
+    const response = await GET(browserRequest);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(result);
@@ -70,6 +71,7 @@ describe("GET /api/catalog/games/search", () => {
         Accept: "application/json",
         "X-PlayVault-Catalog-Visitor": "signed-visitor",
       },
+      signal: browserRequest.signal,
     });
     expect(JSON.stringify(init)).not.toContain("browser-secret");
     expect(JSON.stringify(init)).not.toContain("refresh-secret");

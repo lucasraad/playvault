@@ -140,7 +140,7 @@ describe("useGameSearch", () => {
         genres: [],
       },
     ]);
-    
+
     unmount();
   });
 

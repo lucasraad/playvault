@@ -49,6 +49,8 @@ def test_initial_domain_metadata_keeps_game_and_library_distinct() -> None:
         for constraint in entry.constraints
     )
     assert sum(isinstance(constraint, CheckConstraint) for constraint in entry.constraints) == 5
+    assert tables["platforms"].c.igdb_id.nullable is True
+    assert tables["platforms"].c.igdb_id.unique is True
 
 
 def test_initial_migration_renders_isolated_tables(monkeypatch, capsys) -> None:
@@ -73,3 +75,5 @@ def test_initial_migration_renders_isolated_tables(monkeypatch, capsys) -> None:
         assert f"ALTER TABLE public.{table} ENABLE ROW LEVEL SECURITY" in sql
         assert f"REVOKE ALL ON TABLE public.{table} FROM anon, authenticated, service_role" in sql
     assert "CREATE TABLE auth.users" not in sql
+    assert "ADD COLUMN igdb_id INTEGER" in sql
+    assert "uq_platforms_igdb_id" in sql

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.api.auth import router as auth_router
 from app.api.catalog import router as catalog_router
+from app.api.library import router as library_router
 from app.core.auth import AuthUnavailable
 from app.core.catalog_protection import (
     CatalogProtection,
@@ -81,6 +82,7 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 app.include_router(catalog_router)
+app.include_router(library_router)
 
 
 @app.exception_handler(CatalogProtectionUnavailable)

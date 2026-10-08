@@ -36,6 +36,35 @@ export interface AuthUser {
   email: string | null;
 }
 
+export interface GameSearchPlatform {
+  igdb_id: number;
+  name: string;
+  abbreviation: string | null;
+}
+
+export interface GameSearchGenre {
+  igdb_id: number;
+  name: string;
+}
+
+export interface GameSearchResult {
+  /** External catalog reference. This is not the internal games.id UUID. */
+  igdb_id: number;
+  name: string;
+  slug: string;
+  summary: string | null;
+  first_release_date: string | null;
+  cover_url: string | null;
+  platforms: GameSearchPlatform[];
+  genres: GameSearchGenre[];
+}
+
+export interface GameSearchResponse {
+  query: string;
+  limit: number;
+  results: GameSearchResult[];
+}
+
 /* ---------- Helpers ---------- */
 
 export class ApiRequestError extends Error {
@@ -44,6 +73,8 @@ export class ApiRequestError extends Error {
     public readonly detail: string,
     public readonly code?: string,
     public readonly validationErrors?: ValidationError[],
+    /** Seconds to wait before retrying, when provided by the server. */
+    public readonly retryAfter?: number,
   ) {
     super(detail);
     this.name = "ApiRequestError";
@@ -58,7 +89,16 @@ async function parseErrorResponse(res: Response): Promise<ApiRequestError> {
     return new ApiRequestError(res.status, res.statusText || "Request failed");
   }
 
-  const parsed = (body || {}) as { detail?: unknown; code?: string };
+  const parsed = (body || {}) as {
+    detail?: unknown;
+    code?: string;
+    retry_after?: unknown;
+  };
+
+  const retryAfter =
+    typeof parsed.retry_after === "number" && parsed.retry_after > 0
+      ? parsed.retry_after
+      : undefined;
 
   // FastAPI 422 returns { detail: [ { loc, msg, type } ] }
   if (res.status === 422 && Array.isArray(parsed.detail)) {
@@ -67,6 +107,7 @@ async function parseErrorResponse(res: Response): Promise<ApiRequestError> {
       "Validation failed",
       parsed.code,
       parsed.detail as ValidationError[],
+      retryAfter,
     );
   }
 
@@ -74,7 +115,7 @@ async function parseErrorResponse(res: Response): Promise<ApiRequestError> {
     typeof parsed.detail === "string"
       ? parsed.detail
       : "An unexpected error occurred";
-  return new ApiRequestError(res.status, detail, parsed.code);
+  return new ApiRequestError(res.status, detail, parsed.code, undefined, retryAfter);
 }
 
 /* ---------- Public API ---------- */
@@ -142,15 +183,26 @@ export async function postProxy<T>(
  * GET from the Next.js proxy routes (/api/auth/*).
  * Used by client components. Cookies are sent automatically.
  */
-export async function getProxy<T>(path: string): Promise<T> {
+export async function getProxy<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(path, {
     method: "GET",
     credentials: "same-origin",
     cache: "no-store",
+    signal,
   });
 
   if (!res.ok) throw await parseErrorResponse(res);
   return res.json() as Promise<T>;
+}
+
+/** Search the external catalog through the Next.js BFF. Does not persist games. */
+export async function searchGames(
+  query: string,
+  limit = 10,
+  signal?: AbortSignal,
+): Promise<GameSearchResponse> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  return getProxy<GameSearchResponse>(`/api/catalog/games/search?${params}`, signal);
 }
 
 /**

@@ -3,6 +3,10 @@ from pydantic import SecretStr
 from app.core.config import Settings
 
 
+def test_catalog_protection_defaults_to_fail_closed_production_mode() -> None:
+    assert Settings().app_environment == "production"
+
+
 def test_postgresql_url_uses_psycopg_driver() -> None:
     settings = Settings(
         database_url="postgresql://postgres:password@localhost:5432/postgres"

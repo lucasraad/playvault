@@ -1,5 +1,8 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -8,11 +11,68 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.auth import router as auth_router
+from app.api.catalog import router as catalog_router
 from app.core.auth import AuthUnavailable
+from app.core.catalog_protection import (
+    CatalogProtection,
+    CatalogProtectionUnavailable,
+    InMemoryCatalogProtectionStore,
+    UpstashCatalogProtectionStore,
+)
 from app.core.config import get_settings
+from app.core.igdb import IGDBNotConfiguredError
 from app.db.session import DatabaseNotConfiguredError, get_db_session
+from app.integrations.igdb import IGDBClient
 
-app = FastAPI(title="Gamer Profile API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    http_client: httpx.AsyncClient | None = None
+    store_client: httpx.AsyncClient | None = None
+    if settings.igdb_client_id and settings.igdb_client_secret:
+        http_client = httpx.AsyncClient(timeout=settings.igdb_timeout_seconds)
+        app.state.igdb_client = IGDBClient(
+            http_client,
+            settings.igdb_client_id,
+            settings.igdb_client_secret.get_secret_value(),
+        )
+    visitor_secret = (
+        settings.catalog_visitor_secret.get_secret_value()
+        if settings.catalog_visitor_secret is not None
+        else None
+    )
+    if (
+        settings.upstash_redis_rest_url
+        and settings.upstash_redis_rest_token
+        and visitor_secret
+        and len(visitor_secret) >= 32
+    ):
+        store_client = httpx.AsyncClient(timeout=settings.catalog_store_timeout_seconds)
+        store = UpstashCatalogProtectionStore(
+            store_client,
+            settings.upstash_redis_rest_url,
+            settings.upstash_redis_rest_token.get_secret_value(),
+        )
+        app.state.catalog_protection = CatalogProtection(store, visitor_secret)
+    elif settings.app_environment != "production":
+        app.state.catalog_protection = CatalogProtection(
+            InMemoryCatalogProtectionStore(),
+            visitor_secret or "playvault-development-only-catalog-secret",
+        )
+    try:
+        yield
+    finally:
+        if http_client is not None:
+            await http_client.aclose()
+            del app.state.igdb_client
+        if store_client is not None:
+            await store_client.aclose()
+        if hasattr(app.state, "catalog_protection"):
+            del app.state.catalog_protection
+
+
+app = FastAPI(title="Gamer Profile API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[get_settings().web_origin],
@@ -20,6 +80,22 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 app.include_router(auth_router)
+app.include_router(catalog_router)
+
+
+@app.exception_handler(CatalogProtectionUnavailable)
+def catalog_protection_unavailable_handler(
+    request: Request,
+    exc: CatalogProtectionUnavailable,
+) -> JSONResponse:
+    del request, exc
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={
+            "code": "catalog_protection_unavailable",
+            "detail": "Game search protection unavailable",
+        },
+    )
 
 
 @app.exception_handler(AuthUnavailable)
@@ -37,6 +113,18 @@ def database_not_configured_handler(
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={"detail": "Database unavailable"},
+    )
+
+
+@app.exception_handler(IGDBNotConfiguredError)
+def igdb_not_configured_handler(
+    request: Request,
+    exc: IGDBNotConfiguredError,
+) -> JSONResponse:
+    del request, exc
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"code": "catalog_unavailable", "detail": "Game catalog unavailable"},
     )
 
 

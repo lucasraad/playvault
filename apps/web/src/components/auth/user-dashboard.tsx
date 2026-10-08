@@ -3,10 +3,17 @@
 import { useState } from "react";
 import { useAuth } from "@/context/auth-context";
 import { GameSearch } from "@/components/catalog/game-search";
+import { useGameSearch } from "@/lib/use-game-search";
 
 type DashboardTab = "home" | "search";
 
-export function UserDashboard() {
+export function UserDashboard({
+  searchFetcher,
+  isDemo,
+}: {
+  searchFetcher?: Parameters<typeof useGameSearch>[0];
+  isDemo?: boolean;
+} = {}) {
   const { user, logout, loading, globalError, clearError, refreshUser } = useAuth();
   const [activeTab, setActiveTab] = useState<DashboardTab>("home");
 
@@ -94,14 +101,16 @@ export function UserDashboard() {
           <div className="dashboard__avatar" aria-hidden="true">
             {avatarLetter}
           </div>
-          <button
-            className="dashboard__logout"
-            onClick={logout}
-            disabled={loading}
-            id="logout-button"
-          >
-            Sign out
-          </button>
+          {!isDemo && (
+            <button
+              className="dashboard__logout"
+              onClick={logout}
+              disabled={loading}
+              id="logout-button"
+            >
+              Sign out
+            </button>
+          )}
         </div>
       </header>
 
@@ -219,7 +228,7 @@ export function UserDashboard() {
           </>
         )}
 
-        {activeTab === "search" && <GameSearch />}
+        {activeTab === "search" && <GameSearch fetcher={searchFetcher} isDemo={isDemo} />}
       </main>
     </div>
   );

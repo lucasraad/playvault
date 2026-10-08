@@ -226,19 +226,25 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
   );
 }
 
-function IgdbAttribution() {
+function IgdbAttribution({ isDemo }: { isDemo?: boolean }) {
   return (
     <div className="search__attribution" id="igdb-attribution">
       <span className="search__attribution-text">
-        Game data provided by{" "}
-        <a
-          href="https://www.igdb.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="search__attribution-link"
-        >
-          IGDB.com
-        </a>
+        {isDemo ? (
+          "Mock data for demonstration purposes only"
+        ) : (
+          <>
+            Game data provided by{" "}
+            <a
+              href="https://www.igdb.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="search__attribution-link"
+            >
+              IGDB.com
+            </a>
+          </>
+        )}
       </span>
     </div>
   );
@@ -246,8 +252,14 @@ function IgdbAttribution() {
 
 /* ---------- Main component ---------- */
 
-export function GameSearch() {
-  const { status, query, results, error, search, clear } = useGameSearch();
+export function GameSearch({
+  fetcher,
+  isDemo,
+}: {
+  fetcher?: Parameters<typeof useGameSearch>[0];
+  isDemo?: boolean;
+} = {}) {
+  const { status, query, results, error, search, clear } = useGameSearch(fetcher);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleChange = useCallback(
@@ -346,14 +358,14 @@ export function GameSearch() {
                 <GameCard key={game.igdb_id} game={game} />
               ))}
             </div>
-            <IgdbAttribution />
+            <IgdbAttribution isDemo={isDemo} />
           </>
         )}
 
         {status === "empty" && (
           <>
             <EmptyState query={query} />
-            <IgdbAttribution />
+            <IgdbAttribution isDemo={isDemo} />
           </>
         )}
 

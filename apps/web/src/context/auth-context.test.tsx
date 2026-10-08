@@ -324,6 +324,7 @@ describe("UserDashboard Component", () => {
     await waitFor(() => {
       expect(screen.getByText("Welcome, Gamer!")).toBeInTheDocument();
       expect(screen.getByText("No email provided")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     });
   });
 });

@@ -294,3 +294,89 @@ O frontend consome `searchGames` de `api-client.ts`. A URL interna do FastAPI
 deve usar `API_URL` no servidor Next.js; `NEXT_PUBLIC_API_URL` permanece apenas
 como fallback de compatibilidade. Nenhuma resposta contém credenciais, app
 token, consulta APICalypse ou payload bruto da IGDB.
+
+### Adição à biblioteca a partir do catálogo (Task 007)
+
+Fluxo autenticado: `Browser → POST /api/auth/library/entries (Next.js BFF) →
+POST /library/entries/from-catalog (FastAPI) → IGDBClient + PostgreSQL`.
+
+A rota BFF permanece deliberadamente sob `/api/auth`. Os cookies `gp_at` e
+`gp_rt` continuam restritos a `Path=/api/auth`, sem ampliar tokens para todas as
+rotas `/api`. Por ser escrita autenticada, a rota aceita somente JSON enviado
+da mesma origem: `Origin` deve corresponder à origem da requisição e
+`Sec-Fetch-Site`, quando presente, deve ser `same-origin`.
+
+| Camada | Método e rota | Corpo |
+| --- | --- | --- |
+| Navegador/BFF | `POST /api/auth/library/entries` | `{igdb_id, platform_igdb_id}` |
+| FastAPI | `POST /library/entries/from-catalog` | Mesmo corpo; bearer obrigatório |
+
+Ambos os IDs do corpo são inteiros positivos da IGDB. O cliente não envia
+`profile_id`, `games.id` ou `platforms.id`. O FastAPI obtém o perfil da sessão
+validada, consulta a IGDB por uma query fixa e confirma que a plataforma
+selecionada pertence ao jogo antes de escrever. Então resolve ou cria `Game` e
+`Platform` com UUIDs internos, registra `GamePlatform` e cria `LibraryEntry`
+com `status=backlog` e `source=manual`. A biblioteca manual continua
+independente da disponibilidade da IGDB; somente este fluxo de catálogo exige a
+integração.
+
+A resolução pela IGDB compartilha exatamente o mesmo armazenamento e as mesmas
+chaves globais da busca: no máximo 4 chamadas por segundo e 8 chamadas
+simultâneas em todas as instâncias, com lease renovável enquanto a chamada está
+em andamento. A adição também possui limite distribuído por perfil autenticado
+de 5 resoluções a cada 60 segundos. Esse limite usa o UUID do perfil obtido da
+sessão; nenhum identificador de usuário fornecido pelo navegador é aceito.
+
+Em produção, todos esses limites dependem do armazenamento compartilhado
+configurado para o catálogo. Configuração ausente, falha de armazenamento ou
+perda do lease falham de forma fechada com 503, antes de uma nova chamada à
+IGDB. O armazenamento em memória continua permitido somente em `development`
+e `test`.
+
+Resposta `201` quando criada e `200` quando a mesma combinação já existe:
+
+```json
+{
+  "id": "uuid-da-entrada",
+  "game": {
+    "id": "uuid-interno-do-jogo",
+    "igdb_id": 1942,
+    "title": "The Witcher 3: Wild Hunt"
+  },
+  "platform": {
+    "id": "uuid-interno-da-plataforma",
+    "igdb_id": 6,
+    "slug": "pc",
+    "name": "PC"
+  },
+  "status": "backlog",
+  "source": "manual",
+  "created": true
+}
+```
+
+Erros públicos estáveis:
+
+| Status | `code` | Situação |
+| --- | --- | --- |
+| 400 | `invalid_library_request` | corpo rejeitado pelo BFF |
+| 401 | `no_session` ou `invalid_session` | sessão ausente ou rejeitada |
+| 403 | `invalid_origin` | tentativa de escrita fora da mesma origem |
+| 404 | `catalog_game_not_found` | jogo não existe mais na IGDB |
+| 415 | `invalid_content_type` | corpo não é JSON |
+| 422 | `catalog_platform_not_found` | plataforma não pertence ao jogo |
+| 429 | `rate_limited` | renovação de sessão limitada |
+| 429 | `catalog_user_rate_limited` | perfil excedeu 5 resoluções em 60 segundos |
+| 429 | `catalog_global_rate_limited` | orçamento global ou concorrência compartilhada esgotados |
+| 429 | `catalog_upstream_rate_limited` | IGDB limitou a resolução |
+| 502 | `invalid_catalog_response` ou `catalog_upstream_error` | resposta inválida/rejeitada do catálogo |
+| 502 | `invalid_library_response` ou `library_upstream_error` | contrato inesperado entre BFF e FastAPI |
+| 503 | `auth_unavailable` | autenticação/refresh indisponível |
+| 503 | `catalog_protection_unavailable` | proteção distribuída ausente ou indisponível; IGDB não é chamada |
+| 503 | `catalog_unavailable` | IGDB indisponível |
+| 503 | `library_unavailable` | banco ou serviço de biblioteca indisponível |
+
+O BFF tenta renovar uma vez quando o FastAPI responde 401. Refresh rejeitado
+com 401, ou novo access token também rejeitado com 401, limpa a sessão. Falhas
+429, 5xx, rede e respostas inválidas preservam os cookies; se houver rotação
+antes de uma falha transitória no retry, o novo par permanece armazenado.

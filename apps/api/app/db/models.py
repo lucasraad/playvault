@@ -47,6 +47,9 @@ class Platform(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     slug: Mapped[str] = mapped_column(String(60), unique=True)
     name: Mapped[str] = mapped_column(String(100))
+    igdb_id: Mapped[int | None] = mapped_column(Integer, unique=True)
+
+    __table_args__ = (CheckConstraint("igdb_id > 0", name="ck_platforms_igdb_id_positive"),)
 
 
 class GamePlatform(Base):

@@ -19,7 +19,9 @@
    sessão, sessão expirada, rate limit, indisponibilidade e falha de logout.
 3. Task 005 — integração IGDB.
 4. Task 006 — busca de jogos.
-5. Task 007 — biblioteca.
+5. Task 007 — contrato e backend para adicionar à biblioteca a partir da busca,
+   com BFF autenticado e persistência por UUID interno (implementado; interface
+   visual pendente para o Antigravity).
 6. Task 008 — wishlist.
 7. Task 009 — perfil.
 8. Task 010 — Steam.

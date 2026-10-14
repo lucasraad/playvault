@@ -1,17 +1,16 @@
-import asyncio
-from contextlib import suppress
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.core.catalog_protection import (
+    CatalogGlobalRateLimited,
     CatalogProtection,
-    CatalogProtectionStore,
     CatalogProtectionUnavailable,
     cache_key,
     get_catalog_protection,
     identify_visitor,
+    reserve_igdb_call,
 )
 from app.core.igdb import get_igdb_client
 from app.integrations.igdb import (
@@ -31,13 +30,7 @@ from app.services.game_search import (
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 VISITOR_LIMIT = 10
 VISITOR_WINDOW_SECONDS = 60.0
-GLOBAL_LIMIT = 4
-GLOBAL_WINDOW_SECONDS = 1.0
-GLOBAL_CONCURRENCY = 8
-GLOBAL_LEASE_SECONDS = 15.0
 CACHE_TTL_SECONDS = 60
-GLOBAL_RATE_KEY = "playvault:catalog:igdb:rate"
-GLOBAL_CONCURRENCY_KEY = "playvault:catalog:igdb:concurrency"
 
 
 @router.get("/games/search", response_model=GameSearchResponse)
@@ -71,40 +64,7 @@ async def game_search(
             except ValueError:
                 pass
 
-        global_decision = await protection.store.limit(
-            GLOBAL_RATE_KEY,
-            GLOBAL_LIMIT,
-            GLOBAL_WINDOW_SECONDS,
-        )
-        if not global_decision.allowed:
-            return _rate_limit_response(
-                "catalog_global_rate_limited",
-                "Game catalog request budget exceeded",
-                global_decision.retry_after,
-            )
-
-        lease_id = await protection.store.acquire(
-            GLOBAL_CONCURRENCY_KEY,
-            GLOBAL_CONCURRENCY,
-            GLOBAL_LEASE_SECONDS,
-        )
-        if lease_id is None:
-            return _rate_limit_response(
-                "catalog_global_rate_limited",
-                "Game catalog concurrency limit exceeded",
-                1.0,
-            )
-        stop_renewal = asyncio.Event()
-        renewal_task = asyncio.create_task(
-            _renew_lease_until_stopped(
-                protection.store,
-                GLOBAL_CONCURRENCY_KEY,
-                lease_id,
-                GLOBAL_LEASE_SECONDS,
-                stop_renewal,
-            )
-        )
-        try:
+        async with reserve_igdb_call(protection.store):
             result = await search_games(client, normalized, limit)
             await protection.store.set(
                 result_cache_key,
@@ -112,13 +72,6 @@ async def game_search(
                 CACHE_TTL_SECONDS,
             )
             return result
-        finally:
-            stop_renewal.set()
-            try:
-                await renewal_task
-            finally:
-                with suppress(CatalogProtectionUnavailable):
-                    await protection.store.release(GLOBAL_CONCURRENCY_KEY, lease_id)
     except ValueError:
         return _error_response(400, "invalid_search", "Invalid game search query")
     except CatalogProtectionUnavailable:
@@ -126,6 +79,12 @@ async def game_search(
             503,
             "catalog_protection_unavailable",
             "Game search protection unavailable",
+        )
+    except CatalogGlobalRateLimited as exc:
+        return _rate_limit_response(
+            "catalog_global_rate_limited",
+            "Game catalog request budget exceeded",
+            exc.retry_after,
         )
     except IGDBRateLimitError as exc:
         return _rate_limit_response(
@@ -150,20 +109,3 @@ def _rate_limit_response(code: str, detail: str, retry_after: float | None) -> J
     if retry_after is not None:
         payload["retry_after"] = retry_after
     return JSONResponse(status_code=429, content=payload)
-
-
-async def _renew_lease_until_stopped(
-    store: CatalogProtectionStore,
-    key: str,
-    lease_id: str,
-    lease_seconds: float,
-    stop: asyncio.Event,
-) -> None:
-    interval = lease_seconds / 3
-    while True:
-        try:
-            await asyncio.wait_for(stop.wait(), timeout=interval)
-            return
-        except TimeoutError:
-            if not await store.renew(key, lease_id, lease_seconds):
-                raise CatalogProtectionUnavailable("Catalog concurrency lease was lost")

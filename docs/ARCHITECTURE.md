@@ -320,6 +320,19 @@ com `status=backlog` e `source=manual`. A biblioteca manual continua
 independente da disponibilidade da IGDB; somente este fluxo de catálogo exige a
 integração.
 
+A resolução pela IGDB compartilha exatamente o mesmo armazenamento e as mesmas
+chaves globais da busca: no máximo 4 chamadas por segundo e 8 chamadas
+simultâneas em todas as instâncias, com lease renovável enquanto a chamada está
+em andamento. A adição também possui limite distribuído por perfil autenticado
+de 5 resoluções a cada 60 segundos. Esse limite usa o UUID do perfil obtido da
+sessão; nenhum identificador de usuário fornecido pelo navegador é aceito.
+
+Em produção, todos esses limites dependem do armazenamento compartilhado
+configurado para o catálogo. Configuração ausente, falha de armazenamento ou
+perda do lease falham de forma fechada com 503, antes de uma nova chamada à
+IGDB. O armazenamento em memória continua permitido somente em `development`
+e `test`.
+
 Resposta `201` quando criada e `200` quando a mesma combinação já existe:
 
 ```json
@@ -353,10 +366,13 @@ Erros públicos estáveis:
 | 415 | `invalid_content_type` | corpo não é JSON |
 | 422 | `catalog_platform_not_found` | plataforma não pertence ao jogo |
 | 429 | `rate_limited` | renovação de sessão limitada |
+| 429 | `catalog_user_rate_limited` | perfil excedeu 5 resoluções em 60 segundos |
+| 429 | `catalog_global_rate_limited` | orçamento global ou concorrência compartilhada esgotados |
 | 429 | `catalog_upstream_rate_limited` | IGDB limitou a resolução |
 | 502 | `invalid_catalog_response` ou `catalog_upstream_error` | resposta inválida/rejeitada do catálogo |
 | 502 | `invalid_library_response` ou `library_upstream_error` | contrato inesperado entre BFF e FastAPI |
 | 503 | `auth_unavailable` | autenticação/refresh indisponível |
+| 503 | `catalog_protection_unavailable` | proteção distribuída ausente ou indisponível; IGDB não é chamada |
 | 503 | `catalog_unavailable` | IGDB indisponível |
 | 503 | `library_unavailable` | banco ou serviço de biblioteca indisponível |
 

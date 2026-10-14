@@ -1,11 +1,24 @@
+import asyncio
+import json
 import uuid
 from collections.abc import Callable
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
+from app.api.catalog import game_search
+from app.api.library import AddCatalogGameRequest, add_catalog_game
+from app.core import catalog_protection as catalog_protection_module
 from app.core.auth import SupabaseAuthClient, get_auth_client, get_current_profile
+from app.core.catalog_protection import (
+    CatalogProtection,
+    CatalogProtectionUnavailable,
+    InMemoryCatalogProtectionStore,
+    RateLimitDecision,
+    get_catalog_protection,
+)
 from app.core.igdb import get_igdb_client
 from app.db.models import Game, GamePlatform, LibraryEntry, Platform, Profile
 from app.db.session import get_db_session
@@ -64,8 +77,17 @@ class QueueSession:
         self.rollbacks += 1
 
 
+@pytest.fixture
+def protection_store() -> InMemoryCatalogProtectionStore:
+    return InMemoryCatalogProtectionStore()
+
+
 @pytest.fixture(autouse=True)
-def reset_overrides():
+def reset_overrides(protection_store: InMemoryCatalogProtectionStore):
+    app.dependency_overrides[get_catalog_protection] = lambda: CatalogProtection(
+        protection_store,
+        "test-catalog-secret",
+    )
     yield
     app.dependency_overrides.clear()
 
@@ -211,6 +233,166 @@ def test_add_catalog_game_maps_transient_catalog_failures(
     assert response.status_code == status
     assert response.json()["code"] == code
     assert "timeout" not in response.text
+
+
+def test_add_catalog_game_enforces_distributed_user_limit_before_igdb() -> None:
+    class UserLimitedStore(InMemoryCatalogProtectionStore):
+        async def limit(self, key: str, limit: int, window_seconds: float):
+            assert key == f"playvault:catalog:library:user:{USER_ID}"
+            assert limit == 5
+            assert window_seconds == 60
+            return RateLimitDecision(allowed=False, retry_after=12.0)
+
+    fake = FakeIGDBClient(catalog_game())
+    authenticated_with(fake, QueueSession([]))
+    app.dependency_overrides[get_catalog_protection] = lambda: CatalogProtection(
+        UserLimitedStore(),
+        "test-catalog-secret",
+    )
+
+    response = client.post(
+        "/library/entries/from-catalog",
+        json={"igdb_id": 1942, "platform_igdb_id": 6},
+    )
+
+    assert response.status_code == 429
+    assert response.json()["code"] == "catalog_user_rate_limited"
+    assert response.json()["retry_after"] > 0
+    assert fake.calls == []
+
+
+def test_add_catalog_game_uses_shared_global_igdb_budget_before_igdb() -> None:
+    class ExhaustedGlobalBudgetStore(InMemoryCatalogProtectionStore):
+        async def limit(self, key: str, limit: int, window_seconds: float):
+            if key.startswith("playvault:catalog:library:user:"):
+                return RateLimitDecision(allowed=True, retry_after=0.0)
+            assert key == catalog_protection_module.GLOBAL_IGDB_RATE_KEY
+            assert limit == catalog_protection_module.GLOBAL_IGDB_LIMIT
+            assert window_seconds == catalog_protection_module.GLOBAL_IGDB_WINDOW_SECONDS
+            return RateLimitDecision(allowed=False, retry_after=0.25)
+
+    fake = FakeIGDBClient(catalog_game())
+    authenticated_with(fake, QueueSession([]))
+    app.dependency_overrides[get_catalog_protection] = lambda: CatalogProtection(
+        ExhaustedGlobalBudgetStore(),
+        "test-catalog-secret",
+    )
+
+    response = client.post(
+        "/library/entries/from-catalog",
+        json={"igdb_id": 1942, "platform_igdb_id": 6},
+    )
+
+    assert response.status_code == 429
+    assert response.json() == {
+        "code": "catalog_global_rate_limited",
+        "detail": "Game catalog request budget exceeded",
+        "retry_after": 0.25,
+    }
+    assert fake.calls == []
+
+
+def test_add_catalog_game_fails_closed_when_protection_store_is_unavailable() -> None:
+    class FailingStore(InMemoryCatalogProtectionStore):
+        async def limit(self, key: str, limit: int, window_seconds: float):
+            del key, limit, window_seconds
+            raise CatalogProtectionUnavailable("store unavailable")
+
+    fake = FakeIGDBClient(catalog_game())
+    authenticated_with(fake, QueueSession([]))
+    app.dependency_overrides[get_catalog_protection] = lambda: CatalogProtection(
+        FailingStore(),
+        "test-catalog-secret",
+    )
+
+    response = client.post(
+        "/library/entries/from-catalog",
+        json={"igdb_id": 1942, "platform_igdb_id": 6},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "catalog_protection_unavailable"
+    assert fake.calls == []
+
+
+def test_add_catalog_game_fails_closed_when_protection_dependency_is_unavailable() -> None:
+    fake = FakeIGDBClient(catalog_game())
+    authenticated_with(fake, QueueSession([]))
+
+    def unavailable_protection() -> None:
+        raise CatalogProtectionUnavailable("not configured")
+
+    app.dependency_overrides[get_catalog_protection] = unavailable_protection
+
+    response = client.post(
+        "/library/entries/from-catalog",
+        json={"igdb_id": 1942, "platform_igdb_id": 6},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "catalog_protection_unavailable"
+    assert fake.calls == []
+
+
+@pytest.mark.anyio
+async def test_search_and_library_addition_share_global_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BlockingIGDBClient(FakeIGDBClient):
+        def __init__(self) -> None:
+            super().__init__(
+                [
+                    {
+                        "id": 1942,
+                        "name": "The Witcher 3: Wild Hunt",
+                        "slug": "the-witcher-3-wild-hunt",
+                        "platforms": [{"id": 6, "name": "PC", "abbreviation": "PC"}],
+                    }
+                ]
+            )
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def query(self, endpoint: str, apicalypse_query: str) -> list[dict[str, object]]:
+            self.calls.append((endpoint, apicalypse_query))
+            self.started.set()
+            await self.release.wait()
+            return self.result
+
+    monkeypatch.setattr(catalog_protection_module, "GLOBAL_IGDB_CONCURRENCY", 1)
+    store = InMemoryCatalogProtectionStore()
+    protection = CatalogProtection(store, "test-catalog-secret")
+    fake = BlockingIGDBClient()
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/catalog/games/search",
+            "query_string": b"q=Halo",
+            "headers": [],
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "client": ("127.0.0.1", 1234),
+        }
+    )
+    search_task = asyncio.create_task(game_search(request, fake, protection, "Halo", 10))
+    await asyncio.wait_for(fake.started.wait(), timeout=1)
+    try:
+        library_response = await add_catalog_game(
+            AddCatalogGameRequest(igdb_id=1942, platform_igdb_id=6),
+            Profile(id=USER_ID, username=f"player_{USER_ID.hex}"),
+            protection,
+            fake,
+            QueueSession([]),
+        )
+
+        assert library_response.status_code == 429
+        assert json.loads(library_response.body)["code"] == "catalog_global_rate_limited"
+        assert len(fake.calls) == 1
+    finally:
+        fake.release.set()
+    search_response = await search_task
+    assert search_response.query == "Halo"
 
 
 def test_repeated_combination_returns_the_existing_entry() -> None:

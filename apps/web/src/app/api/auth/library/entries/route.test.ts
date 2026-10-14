@@ -162,7 +162,10 @@ describe("POST /api/auth/library/entries", () => {
   });
 
   it.each([
+    [429, "catalog_user_rate_limited"],
+    [429, "catalog_global_rate_limited"],
     [429, "catalog_upstream_rate_limited"],
+    [503, "catalog_protection_unavailable"],
     [503, "catalog_unavailable"],
     [503, "library_unavailable"],
   ])("preserves session cookies for a transient %i response", async (status, code) => {
@@ -174,6 +177,30 @@ describe("POST /api/auth/library/entries", () => {
 
     expect(response.status).toBe(status);
     await expect(response.json()).resolves.toMatchObject({ code });
+    expect(session.clearSessionCookies).not.toHaveBeenCalled();
+    expect(session.setSessionCookies).not.toHaveBeenCalled();
+  });
+
+  it("forwards the distributed limit retry interval without clearing cookies", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse(
+        {
+          code: "catalog_user_rate_limited",
+          detail: "User catalog library limit exceeded",
+          retry_after: 12,
+        },
+        429,
+      ),
+    );
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(429);
+    await expect(response.json()).resolves.toEqual({
+      code: "catalog_user_rate_limited",
+      detail: "User catalog library limit exceeded",
+      retry_after: 12,
+    });
     expect(session.clearSessionCookies).not.toHaveBeenCalled();
     expect(session.setSessionCookies).not.toHaveBeenCalled();
   });

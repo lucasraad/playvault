@@ -10,7 +10,10 @@ const API_BASE =
 const ALLOWED_ERROR_CODES = new Set([
   "catalog_game_not_found",
   "catalog_platform_not_found",
+  "catalog_user_rate_limited",
+  "catalog_global_rate_limited",
   "catalog_upstream_rate_limited",
+  "catalog_protection_unavailable",
   "catalog_unavailable",
   "invalid_catalog_response",
   "catalog_upstream_error",

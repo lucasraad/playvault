@@ -5,7 +5,8 @@ import json
 import time
 import uuid
 from collections import defaultdict, deque
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -49,6 +50,14 @@ return 1
 
 class CatalogProtectionUnavailable(RuntimeError):
     """The shared protection store is missing or unreachable."""
+
+
+class CatalogGlobalRateLimited(RuntimeError):
+    """The shared IGDB request or concurrency budget is exhausted."""
+
+    def __init__(self, retry_after: float) -> None:
+        self.retry_after = retry_after
+        super().__init__("Global IGDB budget exceeded")
 
 
 @dataclass(frozen=True)
@@ -229,6 +238,70 @@ class InMemoryCatalogProtectionStore:
 class CatalogProtection:
     store: CatalogProtectionStore
     visitor_secret: str
+
+
+GLOBAL_IGDB_LIMIT = 4
+GLOBAL_IGDB_WINDOW_SECONDS = 1.0
+GLOBAL_IGDB_CONCURRENCY = 8
+GLOBAL_IGDB_LEASE_SECONDS = 15.0
+GLOBAL_IGDB_RATE_KEY = "playvault:catalog:igdb:rate"
+GLOBAL_IGDB_CONCURRENCY_KEY = "playvault:catalog:igdb:concurrency"
+
+
+@asynccontextmanager
+async def reserve_igdb_call(store: CatalogProtectionStore) -> AsyncIterator[None]:
+    decision = await store.limit(
+        GLOBAL_IGDB_RATE_KEY,
+        GLOBAL_IGDB_LIMIT,
+        GLOBAL_IGDB_WINDOW_SECONDS,
+    )
+    if not decision.allowed:
+        raise CatalogGlobalRateLimited(decision.retry_after)
+
+    lease_id = await store.acquire(
+        GLOBAL_IGDB_CONCURRENCY_KEY,
+        GLOBAL_IGDB_CONCURRENCY,
+        GLOBAL_IGDB_LEASE_SECONDS,
+    )
+    if lease_id is None:
+        raise CatalogGlobalRateLimited(1.0)
+
+    stop_renewal = asyncio.Event()
+    renewal_task = asyncio.create_task(
+        _renew_lease_until_stopped(
+            store,
+            GLOBAL_IGDB_CONCURRENCY_KEY,
+            lease_id,
+            GLOBAL_IGDB_LEASE_SECONDS,
+            stop_renewal,
+        )
+    )
+    try:
+        yield
+    finally:
+        stop_renewal.set()
+        try:
+            await renewal_task
+        finally:
+            with suppress(CatalogProtectionUnavailable):
+                await store.release(GLOBAL_IGDB_CONCURRENCY_KEY, lease_id)
+
+
+async def _renew_lease_until_stopped(
+    store: CatalogProtectionStore,
+    key: str,
+    lease_id: str,
+    lease_seconds: float,
+    stop: asyncio.Event,
+) -> None:
+    interval = lease_seconds / 3
+    while True:
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+            return
+        except TimeoutError:
+            if not await store.renew(key, lease_id, lease_seconds):
+                raise CatalogProtectionUnavailable("Catalog concurrency lease was lost")
 
 
 def get_catalog_protection(request: Request) -> CatalogProtection:

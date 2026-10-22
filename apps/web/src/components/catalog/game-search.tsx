@@ -10,12 +10,16 @@
  * Accessible: keyboard-navigable, aria-live for result announcements,
  * proper labeling throughout.
  *
- * Does NOT provide an "add to library" button — that is Task 007.
+ * Lets authenticated users select a platform and add a result to their library.
  */
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 
-import type { GameSearchResult } from "@/lib/api-client";
+import {
+  ApiRequestError,
+  addCatalogGameToLibrary,
+  type GameSearchResult,
+} from "@/lib/api-client";
 import { useGameSearch } from "@/lib/use-game-search";
 
 /* ---------- Sub-components ---------- */
@@ -110,12 +114,91 @@ function formatDate(dateStr: string | null): string | null {
   }
 }
 
-function GameCard({ game }: { game: GameSearchResult }) {
+type AddState =
+  | { status: "idle" }
+  | { status: "pending" }
+  | { status: "success"; message: string }
+  | { status: "error"; message: string };
+
+function libraryErrorMessage(error: unknown): { message: string } {
+  if (!(error instanceof ApiRequestError)) {
+    return { message: "We could not add this game. Please try again." };
+  }
+  if (error.status === 401 || error.code === "no_session" || error.code === "invalid_session") {
+    return { message: "Your session expired. Sign in again to add games." };
+  }
+  if (error.status === 422 || error.code === "catalog_platform_not_found") {
+    return { message: "That platform is no longer available for this game. Search again." };
+  }
+  if (error.status === 429) {
+    const wait = error.retryAfter ? ` Try again in ${Math.ceil(error.retryAfter)} seconds.` : " Try again shortly.";
+    return { message: `The library is receiving too many requests.${wait}` };
+  }
+  if (error.status === 503) {
+    return { message: "The library is temporarily unavailable. Your session is still active; please try again." };
+  }
+  return { message: error.detail || "We could not add this game. Please try again." };
+}
+
+function GameCard({
+  game,
+  onSessionInvalid,
+}: {
+  game: GameSearchResult;
+  onSessionInvalid?: () => void;
+}) {
+  const [platformId, setPlatformId] = useState("");
+  const [addState, setAddState] = useState<AddState>({ status: "idle" });
+  const submittingRef = useRef(false);
+  const completedPlatformsRef = useRef(new Set<number>());
+  const [completedPlatforms, setCompletedPlatforms] = useState<ReadonlySet<number>>(
+    () => new Set(),
+  );
   const releaseDate = formatDate(game.first_release_date);
   const platforms = game.platforms
     .map((p) => p.abbreviation || p.name)
     .filter(Boolean);
   const genres = game.genres.map((g) => g.name);
+  const isPending = addState.status === "pending";
+  const selectedPlatform = Number(platformId);
+  const isSelectedComplete =
+    Number.isSafeInteger(selectedPlatform) &&
+    completedPlatforms.has(selectedPlatform);
+
+  const handleAdd = useCallback(async () => {
+    if (submittingRef.current) return;
+    const selectedPlatform = Number(platformId);
+    if (!Number.isSafeInteger(selectedPlatform) || selectedPlatform <= 0) {
+      setAddState({ status: "error", message: "Select a platform before adding this game." });
+      return;
+    }
+    if (completedPlatformsRef.current.has(selectedPlatform)) return;
+
+    submittingRef.current = true;
+    setAddState({ status: "pending" });
+    try {
+      const entry = await addCatalogGameToLibrary(game.igdb_id, selectedPlatform);
+      completedPlatformsRef.current.add(selectedPlatform);
+      setCompletedPlatforms(new Set(completedPlatformsRef.current));
+      setAddState({
+        status: "success",
+        message: entry.created
+          ? `${entry.game.title} was added to your library on ${entry.platform.name}.`
+          : `${entry.game.title} is already in your library on ${entry.platform.name}.`,
+      });
+    } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        (error.code === "no_session" || error.code === "invalid_session")
+      ) {
+        onSessionInvalid?.();
+        return;
+      }
+      setAddState({ status: "error", ...libraryErrorMessage(error) });
+    } finally {
+      submittingRef.current = false;
+    }
+  }, [game.igdb_id, onSessionInvalid, platformId]);
 
   return (
     <article className="search-card" id={`game-${game.igdb_id}`}>
@@ -141,6 +224,55 @@ function GameCard({ game }: { game: GameSearchResult }) {
             ))}
           </div>
         )}
+        <div className="search-card__library-actions">
+          <label className="search-card__platform-label" htmlFor={`platform-${game.igdb_id}`}>
+            Platform
+          </label>
+          <div className="search-card__library-controls">
+            <select
+              id={`platform-${game.igdb_id}`}
+              className="search-card__platform-select"
+              value={platformId}
+              disabled={isPending || game.platforms.length === 0}
+              onChange={(event) => {
+                setPlatformId(event.target.value);
+                setAddState({ status: "idle" });
+              }}
+            >
+              <option value="">Select platform</option>
+              {game.platforms.map((platform) => (
+                <option key={platform.igdb_id} value={platform.igdb_id}>
+                  {platform.abbreviation || platform.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="search-card__add-button"
+              disabled={isPending || isSelectedComplete || game.platforms.length === 0}
+              onClick={handleAdd}
+            >
+              {isPending
+                ? "Adding…"
+                : isSelectedComplete
+                  ? "In library"
+                  : "Add to library"}
+            </button>
+          </div>
+          {game.platforms.length === 0 && (
+            <p className="search-card__feedback search-card__feedback--neutral">
+              No supported platform is available for this result.
+            </p>
+          )}
+          {(addState.status === "success" || addState.status === "error") && (
+            <p
+              className={`search-card__feedback search-card__feedback--${addState.status}`}
+              role={addState.status === "error" ? "alert" : "status"}
+            >
+              {addState.message}
+            </p>
+          )}
+        </div>
       </div>
     </article>
   );
@@ -246,7 +378,7 @@ function IgdbAttribution() {
 
 /* ---------- Main component ---------- */
 
-export function GameSearch() {
+export function GameSearch({ onSessionInvalid }: { onSessionInvalid?: () => void } = {}) {
   const { status, query, results, error, search, clear } = useGameSearch();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -343,7 +475,11 @@ export function GameSearch() {
             </p>
             <div className="search__results" id="search-results">
               {results.map((game) => (
-                <GameCard key={game.igdb_id} game={game} />
+                <GameCard
+                  key={game.igdb_id}
+                  game={game}
+                  onSessionInvalid={onSessionInvalid}
+                />
               ))}
             </div>
             <IgdbAttribution />

@@ -27,12 +27,12 @@ alterações importantes, leia a documentação relevante em `docs/`.
 
 ## Coordenação
 
-- Codex prioriza arquitetura, backend, dados, integrações, testes, segurança e
-  regras de negócio.
-- Antigravity prioriza UI, UX, componentes, responsividade e validação visual.
-- Não implemente a mesma funcionalidade simultaneamente nos dois agentes.
-- Divida features por contrato: Codex fornece API documentada; Antigravity a
-  consome e implementa a experiência visual.
+- Work define o escopo, os critérios de aceite e a ordem das tarefas, além de
+  revisar os pull requests antes de qualquer merge.
+- Codex implementa e valida backend e frontend, incluindo contratos, interface,
+  testes automatizados e validação visual quando aplicável.
+- Não amplie silenciosamente o escopo definido pelo Work. Novas decisões e
+  mudanças de contrato devem ser registradas no documento proprietário e no PR.
 - Antes de mudanças grandes, execute `git status`, confira o branch e preserve
   alterações não commitadas. Não assuma exclusividade do branch atual.
 - Prefira branches específicas por responsabilidade, com o prefixo exigido pelo
@@ -61,4 +61,4 @@ explicação em vários arquivos.
 ## Relatório final
 
 Quando aplicável, informe: implementado, arquivos principais, banco, API, testes,
-decisões técnicas, pendências e impacto no trabalho do Antigravity.
+decisões técnicas, pendências e impacto nas próximas tarefas e contratos.

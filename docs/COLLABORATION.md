@@ -1,28 +1,35 @@
-# Colaboração entre agentes
+# Colaboração entre Work e Codex
 
-Codex e Google Antigravity trabalham no mesmo repositório, com responsabilidades
-complementares e sem presumir exclusividade sobre o branch atual.
+Work e Codex trabalham no mesmo repositório, sem presumir exclusividade sobre o
+branch atual. Work governa a fila e a revisão; Codex executa as tarefas aprovadas
+de ponta a ponta.
+
+## Work
+
+Responsável por:
+
+- definir tarefa, escopo, restrições e critérios de aceite;
+- decidir prioridade e dependências entre entregas;
+- revisar o PR, solicitar ajustes e aprovar o merge;
+- resolver decisões de produto que não possam ser inferidas da documentação.
+
+Work não substitui os contratos versionados no repositório. Quando uma decisão
+nova precisar persistir, ela deve ser registrada no documento proprietário.
 
 ## Codex
 
-Prioriza arquitetura, FastAPI, Python, modelagem, SQLAlchemy, migrations,
-Supabase, autenticação, APIs, integrações, sincronização, jobs, processamento,
-Gamer DNA, testes, refactors, segurança, performance e regras de negócio.
+Responsável por implementar e validar backend e frontend conforme a tarefa,
+incluindo:
 
-## Antigravity
+- arquitetura, FastAPI, Python, modelagem, SQLAlchemy e migrations;
+- Supabase, autenticação, APIs, integrações, sincronização e jobs;
+- Next.js, React, TypeScript, componentes, acessibilidade e responsividade;
+- testes, segurança, performance, regras de negócio e validação visual;
+- documentação de contratos, decisões e limitações encontradas.
 
-Prioriza UI, UX, Next.js, React, componentes, responsividade, dashboard,
-biblioteca visual, páginas de jogo e perfil, estados da interface, navegação e
-validação no navegador.
-
-## Divisão de features
-
-Sempre que possível, Codex implementa e documenta models, migrations, schemas,
-services, endpoints e testes. Antigravity consome esse contrato e implementa a
-experiência visual, incluindo loading, vazio, erro e responsividade.
-
-Os agentes não devem implementar a mesma funcionalidade simultaneamente sem uma
-necessidade explícita.
+Uma feature deve ser entregue verticalmente quando o escopo exigir backend e
+frontend. O contrato da API continua sendo a fronteira explícita entre as
+camadas, mesmo quando ambas são implementadas pelo Codex.
 
 ## Git e escopo
 
@@ -33,12 +40,21 @@ Antes de alterações grandes:
 3. identifique alterações não commitadas;
 4. preserve o trabalho existente.
 
-Use branches específicas por responsabilidade. Não faça refactors ou alterações
-visuais não relacionadas durante tarefas de backend. Problemas fora do escopo
-devem ser registrados como pendência, não corrigidos automaticamente.
+Use branches específicas por tarefa. Não faça refactors ou alterações visuais
+não relacionadas. Problemas fora do escopo devem ser registrados como
+pendência, não corrigidos automaticamente.
 
-## Handoff
+## Pull requests
 
-Ao terminar, registre mudanças de contrato, endpoints, campos, migrations e
-variáveis de ambiente que afetem o outro agente. Alterações incompatíveis nunca
-devem ser silenciosas.
+Cada PR deve informar mudanças de contrato, endpoints, campos, migrations,
+variáveis de ambiente, verificações executadas e limitações. Alterações
+incompatíveis nunca devem ser silenciosas. Work revisa o PR antes do merge.
+
+Branches empilhados devem declarar explicitamente o PR-base e não podem depender
+de provas de conceito ou branches não relacionadas.
+
+## Histórico
+
+Entregas anteriores podem mencionar o Antigravity como autor de UI ou validação
+visual. Essas referências são históricas; não definem responsabilidade para
+tarefas futuras.

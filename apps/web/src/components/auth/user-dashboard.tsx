@@ -7,7 +7,15 @@ import { GameSearch } from "@/components/catalog/game-search";
 type DashboardTab = "home" | "search";
 
 export function UserDashboard() {
-  const { user, logout, loading, globalError, clearError, refreshUser } = useAuth();
+  const {
+    user,
+    logout,
+    loading,
+    globalError,
+    clearError,
+    refreshUser,
+    invalidateSession,
+  } = useAuth();
   const [activeTab, setActiveTab] = useState<DashboardTab>("home");
 
   if (!user) return null;
@@ -219,7 +227,9 @@ export function UserDashboard() {
           </>
         )}
 
-        {activeTab === "search" && <GameSearch />}
+        {activeTab === "search" && (
+          <GameSearch onSessionInvalid={invalidateSession} />
+        )}
       </main>
     </div>
   );

@@ -28,10 +28,17 @@ Primeira etapa de domínio:
 Implementadas na migration `003_initial_domain`:
 
 - `profiles.id` usa o UUID de `auth.users.id` como chave primária e FK com exclusão em cascata. O Supabase é o dono de `auth.users`; o Alembic nunca cria essa tabela. `username` é único.
-- `games` representa o título canônico (`title`, `igdb_id` opcional e único); `platforms` mantém `slug` único e nome legível. Ambos usam UUIDs internos.
+- `games` representa o título canônico (`title`, `igdb_id` opcional e único); `platforms` mantém `slug` único, nome legível e `igdb_id` opcional e único após a migration `004_platform_igdb_id`. Ambos usam UUIDs internos. O identificador da IGDB é apenas referência auxiliar e nunca substitui a chave primária.
 - `game_platforms` registra combinações conhecidas de jogo e plataforma, únicas por par. A biblioteca manual pode ser preenchida mesmo que essa associação ainda não tenha sido importada.
 - `library_entries` é única por `profile_id + game_id + platform_id`. Contém `status`, `source`, `playtime_minutes`, `rating` de 0 a 10 e `completion_percent` de 0 a 100. Os valores iniciais são `backlog`, `manual` e zero minuto.
 - `wishlist_entries` é única por `profile_id + game_id` e independe da biblioteca.
+
+A migration `004_platform_igdb_id` adiciona a referência necessária para
+resolver de forma inequívoca a plataforma escolhida na busca. O campo é
+nullable para que plataformas cadastradas manualmente continuem independentes
+da IGDB. Quando uma plataforma manual com o mesmo `slug` ainda não possui
+referência externa, o fluxo de catálogo pode associá-la ao `igdb_id`; conflitos
+reais de slug usam um slug qualificado pelo ID externo, preservando os UUIDs.
 
 As seis tabelas estão no schema `public`, com RLS habilitada e privilégios de `anon`, `authenticated` e `service_role` revogados. O acesso a dados ocorre pela API FastAPI, cuja conexão de banco deve ter privilégios apropriados. A Task 004 implementou autenticação, verificação de identidade e criação do perfil mínimo no primeiro `GET /auth/me` autenticado. Ainda não há políticas públicas de Data API nem gatilho de criação automática de perfil.
 

@@ -102,3 +102,35 @@ describe("parseErrorResponse (via searchGames/getProxy)", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("addCatalogGameToLibrary", () => {
+  it("posts only the external game and platform identifiers to the authenticated BFF", async () => {
+    const payload = {
+      id: "entry-id",
+      game: { id: "game-id", igdb_id: 740, title: "Halo" },
+      platform: { id: "platform-id", igdb_id: 11, slug: "xbox", name: "Xbox" },
+      status: "backlog",
+      source: "manual",
+      created: true,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { addCatalogGameToLibrary } = await import("./api-client");
+
+    await expect(addCatalogGameToLibrary(740, 11)).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/auth/library/entries",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "same-origin",
+        body: JSON.stringify({ igdb_id: 740, platform_igdb_id: 11 }),
+      }),
+    );
+    vi.unstubAllGlobals();
+  });
+});

@@ -6,12 +6,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 
 import { ApiRequestError } from "@/lib/api-client";
-import type { GameSearchResponse } from "@/lib/api-client";
+import type { GameSearchResponse, LibraryEntryResponse } from "@/lib/api-client";
 
 /* ---------- Mock api-client ---------- */
 
 const mockSearchGames = vi.fn<
   (query: string, limit?: number, signal?: AbortSignal) => Promise<GameSearchResponse>
+>();
+const mockAddCatalogGameToLibrary = vi.fn<
+  (igdbId: number, platformIgdbId: number) => Promise<LibraryEntryResponse>
 >();
 
 vi.mock("@/lib/api-client", async (importOriginal) => {
@@ -19,6 +22,8 @@ vi.mock("@/lib/api-client", async (importOriginal) => {
   return {
     ...actual,
     searchGames: (...args: Parameters<typeof mockSearchGames>) => mockSearchGames(...args),
+    addCatalogGameToLibrary: (...args: Parameters<typeof mockAddCatalogGameToLibrary>) =>
+      mockAddCatalogGameToLibrary(...args),
   };
 });
 
@@ -514,5 +519,94 @@ describe("GameSearch component", () => {
     await waitFor(() => {
       expect(screen.getByText("Stadia · XONE")).toBeInTheDocument();
     });
+  });
+
+  it("requires a platform before adding a game", async () => {
+    mockSearchGames.mockResolvedValueOnce(HALO_RESULTS);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<GameSearch />);
+
+    await user.type(screen.getByRole("searchbox"), "Halo");
+    await act(async () => vi.advanceTimersByTime(350));
+    await screen.findByText("Halo: Combat Evolved");
+    await user.click(screen.getAllByRole("button", { name: "Add to library" })[0]);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Select a platform");
+    expect(mockAddCatalogGameToLibrary).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [true, 201, "was added to your library"],
+    [false, 200, "is already in your library"],
+  ])("reports created=%s results from the library", async (created, _status, message) => {
+    mockSearchGames.mockResolvedValueOnce(HALO_RESULTS);
+    mockAddCatalogGameToLibrary.mockResolvedValueOnce({
+      id: "entry-id",
+      game: { id: "game-id", igdb_id: 740, title: "Halo: Combat Evolved" },
+      platform: { id: "platform-id", igdb_id: 11, slug: "xbox", name: "Xbox" },
+      status: "backlog",
+      source: "manual",
+      created,
+    });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<GameSearch />);
+
+    await user.type(screen.getByRole("searchbox"), "Halo");
+    await act(async () => vi.advanceTimersByTime(350));
+    await screen.findByText("Halo: Combat Evolved");
+    await user.selectOptions(screen.getAllByLabelText("Platform")[0], "11");
+    await user.click(screen.getAllByRole("button", { name: "Add to library" })[0]);
+
+    expect(await screen.findByText(new RegExp(message))).toBeInTheDocument();
+    expect(mockAddCatalogGameToLibrary).toHaveBeenCalledWith(740, 11);
+  });
+
+  it("prevents duplicate submissions while the request is pending", async () => {
+    mockSearchGames.mockResolvedValueOnce(HALO_RESULTS);
+    let resolveAdd!: (entry: LibraryEntryResponse) => void;
+    mockAddCatalogGameToLibrary.mockReturnValueOnce(
+      new Promise((resolve) => { resolveAdd = resolve; }),
+    );
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<GameSearch />);
+
+    await user.type(screen.getByRole("searchbox"), "Halo");
+    await act(async () => vi.advanceTimersByTime(350));
+    await screen.findByText("Halo: Combat Evolved");
+    await user.selectOptions(screen.getAllByLabelText("Platform")[0], "11");
+    const button = screen.getAllByRole("button", { name: "Add to library" })[0];
+    await user.dblClick(button);
+
+    expect(mockAddCatalogGameToLibrary).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Adding…" })).toBeDisabled();
+    resolveAdd({
+      id: "entry-id",
+      game: { id: "game-id", igdb_id: 740, title: "Halo: Combat Evolved" },
+      platform: { id: "platform-id", igdb_id: 11, slug: "xbox", name: "Xbox" },
+      status: "backlog",
+      source: "manual",
+      created: true,
+    });
+    await screen.findByText(/was added to your library/);
+  });
+
+  it.each([
+    [new ApiRequestError(401, "Invalid session", "invalid_session"), "session expired"],
+    [new ApiRequestError(422, "Invalid platform", "catalog_platform_not_found"), "no longer available"],
+    [new ApiRequestError(429, "Limited", "catalog_user_rate_limited", undefined, 12.2), "13 seconds"],
+    [new ApiRequestError(503, "Unavailable", "library_unavailable"), "session is still active"],
+  ])("shows an actionable library error without clearing local auth", async (failure, message) => {
+    mockSearchGames.mockResolvedValueOnce(HALO_RESULTS);
+    mockAddCatalogGameToLibrary.mockRejectedValueOnce(failure);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<GameSearch />);
+
+    await user.type(screen.getByRole("searchbox"), "Halo");
+    await act(async () => vi.advanceTimersByTime(350));
+    await screen.findByText("Halo: Combat Evolved");
+    await user.selectOptions(screen.getAllByLabelText("Platform")[0], "11");
+    await user.click(screen.getAllByRole("button", { name: "Add to library" })[0]);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
   });
 });

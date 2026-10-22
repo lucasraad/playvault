@@ -65,6 +65,15 @@ export interface GameSearchResponse {
   results: GameSearchResult[];
 }
 
+export interface LibraryEntryResponse {
+  id: string;
+  game: { id: string; igdb_id: number; title: string };
+  platform: { id: string; igdb_id: number; slug: string; name: string };
+  status: string;
+  source: string;
+  created: boolean;
+}
+
 /* ---------- Helpers ---------- */
 
 export class ApiRequestError extends Error {
@@ -203,6 +212,17 @@ export async function searchGames(
 ): Promise<GameSearchResponse> {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
   return getProxy<GameSearchResponse>(`/api/catalog/games/search?${params}`, signal);
+}
+
+/** Add one catalog game/platform combination through the authenticated BFF. */
+export async function addCatalogGameToLibrary(
+  igdbId: number,
+  platformIgdbId: number,
+): Promise<LibraryEntryResponse> {
+  return postProxy<LibraryEntryResponse>("/api/auth/library/entries", {
+    igdb_id: igdbId,
+    platform_igdb_id: platformIgdbId,
+  });
 }
 
 /**

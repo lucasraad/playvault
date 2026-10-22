@@ -46,7 +46,11 @@ O frontend usa exclusivamente a API FastAPI para cadastro, login, renovação da
 
 Requisições com corpo inválido retornam 422. Erros do provedor não são repassados com dados internos. Outros endpoints privados devem depender de `get_current_profile` e obter o identificador do usuário validado. O backend não usa o Data API para as seis tabelas iniciais.
 
-Para o Antigravity: criar páginas de cadastro/login, estados de confirmação de e-mail, expiração e renovação de sessão, tratamento de 401/429/503 e rota protegida de perfil. Planejar armazenamento de sessão no lado do servidor ou em cookies `HttpOnly`; nunca colocar o refresh token em URL ou registrar tokens em logs. A origem do frontend deve corresponder a `WEB_ORIGIN`. Não acessar o Supabase Auth diretamente no navegador, conforme o fluxo de arquitetura definido aqui.
+O frontend implementado inclui páginas de cadastro/login, estados de confirmação
+de e-mail, expiração e renovação de sessão e rota protegida de perfil. A sessão
+fica no BFF, em cookies `HttpOnly`; o refresh token nunca deve aparecer em URL ou
+logs. A origem do frontend deve corresponder a `WEB_ORIGIN`. O navegador não
+acessa o Supabase Auth diretamente, conforme o fluxo definido aqui.
 
 ## Estratégia de sessão (Task 004, frontend)
 

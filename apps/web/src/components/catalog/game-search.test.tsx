@@ -540,14 +540,23 @@ describe("GameSearch component", () => {
     [false, 200, "is already in your library"],
   ])("reports created=%s results from the library", async (created, _status, message) => {
     mockSearchGames.mockResolvedValueOnce(HALO_RESULTS);
-    mockAddCatalogGameToLibrary.mockResolvedValueOnce({
-      id: "entry-id",
-      game: { id: "game-id", igdb_id: 740, title: "Halo: Combat Evolved" },
-      platform: { id: "platform-id", igdb_id: 11, slug: "xbox", name: "Xbox" },
-      status: "backlog",
-      source: "manual",
-      created,
-    });
+    mockAddCatalogGameToLibrary
+      .mockResolvedValueOnce({
+        id: "entry-id",
+        game: { id: "game-id", igdb_id: 740, title: "Halo: Combat Evolved" },
+        platform: { id: "platform-id", igdb_id: 11, slug: "xbox", name: "Xbox" },
+        status: "backlog",
+        source: "manual",
+        created,
+      })
+      .mockResolvedValueOnce({
+        id: "pc-entry-id",
+        game: { id: "game-id", igdb_id: 740, title: "Halo: Combat Evolved" },
+        platform: { id: "pc-platform-id", igdb_id: 6, slug: "pc", name: "PC" },
+        status: "backlog",
+        source: "manual",
+        created: true,
+      });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<GameSearch />);
 
@@ -559,6 +568,17 @@ describe("GameSearch component", () => {
 
     expect(await screen.findByText(new RegExp(message))).toBeInTheDocument();
     expect(mockAddCatalogGameToLibrary).toHaveBeenCalledWith(740, 11);
+
+    const completedButton = screen.getByRole("button", { name: "In library" });
+    expect(completedButton).toBeDisabled();
+    await user.click(completedButton);
+    expect(mockAddCatalogGameToLibrary).toHaveBeenCalledTimes(1);
+
+    await user.selectOptions(screen.getAllByLabelText("Platform")[0], "6");
+    const otherPlatformButton = screen.getAllByRole("button", { name: "Add to library" })[0];
+    expect(otherPlatformButton).toBeEnabled();
+    await user.click(otherPlatformButton);
+    expect(mockAddCatalogGameToLibrary).toHaveBeenNthCalledWith(2, 740, 6);
   });
 
   it("prevents duplicate submissions while the request is pending", async () => {
@@ -591,15 +611,15 @@ describe("GameSearch component", () => {
   });
 
   it.each([
-    [new ApiRequestError(401, "Invalid session", "invalid_session"), "session expired"],
     [new ApiRequestError(422, "Invalid platform", "catalog_platform_not_found"), "no longer available"],
     [new ApiRequestError(429, "Limited", "catalog_user_rate_limited", undefined, 12.2), "13 seconds"],
     [new ApiRequestError(503, "Unavailable", "library_unavailable"), "session is still active"],
-  ])("shows an actionable library error without clearing local auth", async (failure, message) => {
+  ])("shows an actionable transient library error without invalidating auth", async (failure, message) => {
     mockSearchGames.mockResolvedValueOnce(HALO_RESULTS);
     mockAddCatalogGameToLibrary.mockRejectedValueOnce(failure);
+    const onSessionInvalid = vi.fn();
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    render(<GameSearch />);
+    render(<GameSearch onSessionInvalid={onSessionInvalid} />);
 
     await user.type(screen.getByRole("searchbox"), "Halo");
     await act(async () => vi.advanceTimersByTime(350));
@@ -608,5 +628,27 @@ describe("GameSearch component", () => {
     await user.click(screen.getAllByRole("button", { name: "Add to library" })[0]);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(onSessionInvalid).not.toHaveBeenCalled();
   });
+
+  it.each(["no_session", "invalid_session"])(
+    "notifies the auth owner when the BFF returns %s",
+    async (code) => {
+      mockSearchGames.mockResolvedValueOnce(HALO_RESULTS);
+      mockAddCatalogGameToLibrary.mockRejectedValueOnce(
+        new ApiRequestError(401, "Session unavailable", code),
+      );
+      const onSessionInvalid = vi.fn();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(<GameSearch onSessionInvalid={onSessionInvalid} />);
+
+      await user.type(screen.getByRole("searchbox"), "Halo");
+      await act(async () => vi.advanceTimersByTime(350));
+      await screen.findByText("Halo: Combat Evolved");
+      await user.selectOptions(screen.getAllByLabelText("Platform")[0], "11");
+      await user.click(screen.getAllByRole("button", { name: "Add to library" })[0]);
+
+      await waitFor(() => expect(onSessionInvalid).toHaveBeenCalledOnce());
+    },
+  );
 });

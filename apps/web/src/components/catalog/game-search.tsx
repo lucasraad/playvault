@@ -140,16 +140,30 @@ function libraryErrorMessage(error: unknown): { message: string } {
   return { message: error.detail || "We could not add this game. Please try again." };
 }
 
-function GameCard({ game }: { game: GameSearchResult }) {
+function GameCard({
+  game,
+  onSessionInvalid,
+}: {
+  game: GameSearchResult;
+  onSessionInvalid?: () => void;
+}) {
   const [platformId, setPlatformId] = useState("");
   const [addState, setAddState] = useState<AddState>({ status: "idle" });
   const submittingRef = useRef(false);
+  const completedPlatformsRef = useRef(new Set<number>());
+  const [completedPlatforms, setCompletedPlatforms] = useState<ReadonlySet<number>>(
+    () => new Set(),
+  );
   const releaseDate = formatDate(game.first_release_date);
   const platforms = game.platforms
     .map((p) => p.abbreviation || p.name)
     .filter(Boolean);
   const genres = game.genres.map((g) => g.name);
   const isPending = addState.status === "pending";
+  const selectedPlatform = Number(platformId);
+  const isSelectedComplete =
+    Number.isSafeInteger(selectedPlatform) &&
+    completedPlatforms.has(selectedPlatform);
 
   const handleAdd = useCallback(async () => {
     if (submittingRef.current) return;
@@ -158,11 +172,14 @@ function GameCard({ game }: { game: GameSearchResult }) {
       setAddState({ status: "error", message: "Select a platform before adding this game." });
       return;
     }
+    if (completedPlatformsRef.current.has(selectedPlatform)) return;
 
     submittingRef.current = true;
     setAddState({ status: "pending" });
     try {
       const entry = await addCatalogGameToLibrary(game.igdb_id, selectedPlatform);
+      completedPlatformsRef.current.add(selectedPlatform);
+      setCompletedPlatforms(new Set(completedPlatformsRef.current));
       setAddState({
         status: "success",
         message: entry.created
@@ -170,11 +187,18 @@ function GameCard({ game }: { game: GameSearchResult }) {
           : `${entry.game.title} is already in your library on ${entry.platform.name}.`,
       });
     } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        (error.code === "no_session" || error.code === "invalid_session")
+      ) {
+        onSessionInvalid?.();
+        return;
+      }
       setAddState({ status: "error", ...libraryErrorMessage(error) });
     } finally {
       submittingRef.current = false;
     }
-  }, [game.igdb_id, platformId]);
+  }, [game.igdb_id, onSessionInvalid, platformId]);
 
   return (
     <article className="search-card" id={`game-${game.igdb_id}`}>
@@ -225,10 +249,14 @@ function GameCard({ game }: { game: GameSearchResult }) {
             <button
               type="button"
               className="search-card__add-button"
-              disabled={isPending || game.platforms.length === 0}
+              disabled={isPending || isSelectedComplete || game.platforms.length === 0}
               onClick={handleAdd}
             >
-              {isPending ? "Adding…" : "Add to library"}
+              {isPending
+                ? "Adding…"
+                : isSelectedComplete
+                  ? "In library"
+                  : "Add to library"}
             </button>
           </div>
           {game.platforms.length === 0 && (
@@ -350,7 +378,7 @@ function IgdbAttribution() {
 
 /* ---------- Main component ---------- */
 
-export function GameSearch() {
+export function GameSearch({ onSessionInvalid }: { onSessionInvalid?: () => void } = {}) {
   const { status, query, results, error, search, clear } = useGameSearch();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -447,7 +475,11 @@ export function GameSearch() {
             </p>
             <div className="search__results" id="search-results">
               {results.map((game) => (
-                <GameCard key={game.igdb_id} game={game} />
+                <GameCard
+                  key={game.igdb_id}
+                  game={game}
+                  onSessionInvalid={onSessionInvalid}
+                />
               ))}
             </div>
             <IgdbAttribution />

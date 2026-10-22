@@ -8,7 +8,12 @@ import React from "react";
 import { AuthProvider, useAuth } from "@/context/auth-context";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { UserDashboard } from "@/components/auth/user-dashboard";
-import { getProxy } from "@/lib/api-client";
+import {
+  ApiRequestError,
+  addCatalogGameToLibrary,
+  getProxy,
+  searchGames,
+} from "@/lib/api-client";
 
 vi.mock("@/lib/api-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api-client")>();
@@ -16,6 +21,8 @@ vi.mock("@/lib/api-client", async (importOriginal) => {
     ...actual,
     getProxy: vi.fn(),
     postProxy: vi.fn(),
+    searchGames: vi.fn(),
+    addCatalogGameToLibrary: vi.fn(),
   };
 });
 
@@ -26,6 +33,8 @@ function TestTrigger() {
 
 describe("Auth UI - Recoverable Errors", () => {
   const mockGetProxy = vi.mocked(getProxy);
+  const mockSearchGames = vi.mocked(searchGames);
+  const mockAddCatalogGameToLibrary = vi.mocked(addCatalogGameToLibrary);
 
   beforeEach(() => {
     vi.resetAllMocks();
@@ -118,5 +127,92 @@ describe("Auth UI - Recoverable Errors", () => {
     await waitFor(() => {
       expect(screen.queryByText("Too many requests. Please wait a moment and try again.")).not.toBeInTheDocument();
     });
+  });
+
+  it.each(["no_session", "invalid_session"])(
+    "AuthShell: returns to login when a library write reports %s",
+    async (code) => {
+      mockGetProxy.mockImplementation(async (path) => {
+        if (path === "/api/auth/refresh") return { has_session: true };
+        if (path === "/api/auth/me") return { id: "1", email: "gamer@example.com" };
+        throw new Error("Unexpected path");
+      });
+      mockSearchGames.mockResolvedValue({
+        query: "Halo",
+        limit: 10,
+        results: [{
+          igdb_id: 740,
+          name: "Halo: Combat Evolved",
+          slug: "halo-combat-evolved",
+          summary: null,
+          first_release_date: null,
+          cover_url: null,
+          platforms: [{ igdb_id: 11, name: "Xbox", abbreviation: "XBOX" }],
+          genres: [],
+        }],
+      });
+      mockAddCatalogGameToLibrary.mockRejectedValue(
+        new ApiRequestError(401, "Session unavailable", code),
+      );
+
+      render(
+        <AuthProvider>
+          <AuthShell />
+        </AuthProvider>,
+      );
+
+      await screen.findByText("Welcome, gamer!");
+      await userEvent.click(screen.getByRole("button", { name: "Search" }));
+      await userEvent.type(screen.getByRole("searchbox"), "Halo");
+      await screen.findByText("Halo: Combat Evolved");
+      await userEvent.selectOptions(screen.getByLabelText("Platform"), "11");
+      await userEvent.click(screen.getByRole("button", { name: "Add to library" }));
+
+      expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+      expect(screen.queryByText("Welcome, gamer!")).not.toBeInTheDocument();
+    },
+  );
+
+  it.each([
+    [new ApiRequestError(429, "Limited", "catalog_user_rate_limited", undefined, 8), "8 seconds"],
+    [new ApiRequestError(503, "Unavailable", "library_unavailable"), "session is still active"],
+  ])("AuthShell: preserves the authenticated dashboard for transient library failures", async (failure, message) => {
+    mockGetProxy.mockImplementation(async (path) => {
+      if (path === "/api/auth/refresh") return { has_session: true };
+      if (path === "/api/auth/me") return { id: "1", email: "gamer@example.com" };
+      throw new Error("Unexpected path");
+    });
+    mockSearchGames.mockResolvedValue({
+      query: "Halo",
+      limit: 10,
+      results: [{
+        igdb_id: 740,
+        name: "Halo: Combat Evolved",
+        slug: "halo-combat-evolved",
+        summary: null,
+        first_release_date: null,
+        cover_url: null,
+        platforms: [{ igdb_id: 11, name: "Xbox", abbreviation: "XBOX" }],
+        genres: [],
+      }],
+    });
+    mockAddCatalogGameToLibrary.mockRejectedValue(failure);
+
+    render(
+      <AuthProvider>
+        <AuthShell />
+      </AuthProvider>,
+    );
+
+    await screen.findByText("Welcome, gamer!");
+    await userEvent.click(screen.getByRole("button", { name: "Search" }));
+    await userEvent.type(screen.getByRole("searchbox"), "Halo");
+    await screen.findByText("Halo: Combat Evolved");
+    await userEvent.selectOptions(screen.getByLabelText("Platform"), "11");
+    await userEvent.click(screen.getByRole("button", { name: "Add to library" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Sign in" })).not.toBeInTheDocument();
   });
 });

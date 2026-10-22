@@ -384,3 +384,10 @@ O BFF tenta renovar uma vez quando o FastAPI responde 401. Refresh rejeitado
 com 401, ou novo access token também rejeitado com 401, limpa a sessão. Falhas
 429, 5xx, rede e respostas inválidas preservam os cookies; se houver rotação
 antes de uma falha transitória no retry, o novo par permanece armazenado.
+
+Na interface, `no_session` e `invalid_session` também invalidam o usuário no
+`AuthContext`, fazendo o `AuthShell` voltar ao login. Respostas 429 e 503 exibem
+feedback no resultado sem remover o usuário autenticado. Depois de uma resposta
+201 ou 200, a combinação de jogo e plataforma fica marcada como já adicionada
+durante a vida do resultado atual; outras plataformas do mesmo jogo continuam
+selecionáveis e podem ser adicionadas separadamente.
